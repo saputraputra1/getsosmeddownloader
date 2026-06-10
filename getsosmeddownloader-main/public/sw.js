@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mediaget-v4';
+const CACHE_NAME = 'mediaget-v5';
 const ASSETS = [
   '/',
   '/index.html',

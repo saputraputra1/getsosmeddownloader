@@ -112,6 +112,18 @@ const PLATFORMS = {
     ],
     requiresPath: false,
   },
+  threads: {
+    name: "Threads",
+    icon: "🧵",
+    hostPatterns: [
+      /^(www\.)?threads\.net$/,
+      /^(www\.)?threads\.com$/,
+    ],
+    pathPatterns: [
+      /\/@[\w.]+\/post\/[\w-]+/,
+    ],
+    requiresPath: true,
+  },
 };
 
 /**
@@ -1098,6 +1110,214 @@ async function scrapeViaRapidAPI(url) {
     source: "rapidapi",
     warning: null
   };
+}
+
+// ─── Threads.net Playwright Scraper (fallback untuk photo carousel) ─────────
+
+async function scrapeThreadsViaPlaywright(url) {
+  let browser;
+  console.log("[Threads] Mencoba Playwright untuk Threads post...");
+
+  try {
+    const { chromium } = require('playwright');
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 900 }
+    });
+    const page = await context.newPage();
+
+    // Collect media from network
+    const capturedMedia = [];
+    page.on('response', async (response) => {
+      const respUrl = response.url();
+      const contentType = response.headers()['content-type'] || '';
+
+      // Capture video
+      if (contentType.includes('video') || respUrl.includes('.mp4')) {
+        if (respUrl.includes('cdninstagram.com') || respUrl.includes('fbcdn') || respUrl.includes('scontent')) {
+          capturedMedia.push({ type: 'video', url: respUrl });
+        }
+      }
+      // Capture high-res images
+      if (contentType.includes('image/jpeg') || contentType.includes('image/png') || contentType.includes('image/webp')) {
+        if ((respUrl.includes('cdninstagram.com') || respUrl.includes('fbcdn') || respUrl.includes('scontent'))
+            && !respUrl.includes('profile_pic') && !respUrl.includes('s150x150')
+            && !respUrl.includes('s320x320') && !respUrl.includes('emoji') && !respUrl.includes('static')) {
+          capturedMedia.push({ type: 'image', url: respUrl });
+        }
+      }
+    });
+
+    await page.route('**/*.{woff,woff2,ttf}', route => route.abort());
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(4000);
+
+    // Dismiss any modals
+    try { await page.keyboard.press('Escape'); } catch {}
+    await page.waitForTimeout(1000);
+
+    // Extract from DOM: video sources + thumbnails
+    const domMedia = await page.evaluate(() => {
+      const results = [];
+      // Videos - also capture poster/thumbnail
+      document.querySelectorAll('video').forEach(vid => {
+        const src = vid.src || vid.querySelector('source')?.src;
+        const poster = vid.getAttribute('poster') || '';
+        if (src && (src.includes('cdninstagram.com') || src.includes('fbcdn') || src.includes('scontent'))
+            && !src.includes('t50')) {
+          results.push({ type: 'video', url: src, thumbnail: poster || null });
+        }
+      });
+      // Images (filter out small icons) - these serve as potential thumbnails too
+      document.querySelectorAll('img').forEach(img => {
+        const src = img.src || '';
+        if (src && (src.includes('cdninstagram.com') || src.includes('fbcdn') || src.includes('scontent'))
+            && !src.includes('profile_pic') && !src.includes('s150x150')
+            && !src.includes('s320x320') && !src.includes('emoji') && !src.includes('static')
+            && (img.naturalWidth > 300 || img.width > 300)) {
+          results.push({ type: 'image', url: src, thumbnail: src });
+        }
+      });
+      return results;
+    });
+
+    // Search HTML for embedded media URLs
+    const html = await page.content();
+    const scriptMedia = [];
+    // Collect all thumbnail/cover images from HTML
+    const thumbnailMap = {};
+    // video_url patterns
+    const videoUrlRegex = /"video_url"\s*:\s*"([^"]+)"/gi;
+    let match;
+    while ((match = videoUrlRegex.exec(html)) !== null) {
+      const decoded = match[1].replace(/\\u0026/g, '&').replace(/\\//g, '/');
+      if (decoded.includes('cdninstagram.com') || decoded.includes('fbcdn')) {
+        scriptMedia.push({ type: 'video', url: decoded });
+      }
+    }
+    // display_url patterns (these are image/thumbnail URLs)
+    const displayUrlRegex = /"display_url"\s*:\s*"([^"]+)"/gi;
+    while ((match = displayUrlRegex.exec(html)) !== null) {
+      const decoded = match[1].replace(/\\u0026/g, '&').replace(/\\//g, '/');
+      if ((decoded.includes('cdninstagram.com') || decoded.includes('fbcdn'))
+          && !decoded.includes('s150x150') && !decoded.includes('profile_pic')) {
+        scriptMedia.push({ type: 'image', url: decoded, thumbnail: decoded });
+      }
+    }
+    // image_url / thumbnail_url patterns
+    const thumbUrlRegex = /"(?:thumbnail_url|image_url|cover_image_url)"\s*:\s*"([^"]+)"/gi;
+    while ((match = thumbUrlRegex.exec(html)) !== null) {
+      const decoded = match[1].replace(/\\u0026/g, '&').replace(/\\//g, '/');
+      if ((decoded.includes('cdninstagram.com') || decoded.includes('fbcdn'))
+          && !decoded.includes('s150x150') && !decoded.includes('profile_pic')) {
+        // Store as thumbnail candidate
+        const baseKey = decoded.split('?')[0];
+        if (!thumbnailMap[baseKey]) thumbnailMap[baseKey] = decoded;
+      }
+    }
+
+    // Extract author from page
+    const authorName = await page.evaluate(() => {
+      // Most reliable: extract from URL path
+      const pathMatch = location.pathname.match(/\/@([\w.]+)\//);
+      if (pathMatch) return pathMatch[1];
+      // Fallback: look for username link
+      const link = document.querySelector('a[href^="/@"]');
+      if (link) {
+        const href = link.getAttribute('href');
+        const match = href.match(/\/@([\w.]+)\/?/);
+        if (match) return match[1];
+      }
+      return 'Threads User';
+    });
+
+    await browser.close();
+    browser = null;
+
+    // Combine all sources
+    const allMedia = [...capturedMedia, ...domMedia, ...scriptMedia];
+    console.log(`[Threads] Network: ${capturedMedia.length}, DOM: ${domMedia.length}, HTML: ${scriptMedia.length} media found`);
+
+    // Deduplicate
+    const seen = new Set();
+    const uniqueMedia = [];
+    for (const item of allMedia) {
+      const baseUrl = item.url.split('?')[0];
+      if (!seen.has(baseUrl)) {
+        seen.add(baseUrl);
+        uniqueMedia.push(item);
+      } else if (item.thumbnail) {
+        // Update existing entry with thumbnail if current one has none
+        const existing = uniqueMedia.find(m => m.url.split('?')[0] === baseUrl);
+        if (existing && !existing.thumbnail) {
+          existing.thumbnail = item.thumbnail;
+        }
+      }
+    }
+
+    // Prefer videos over images
+    const videos = uniqueMedia.filter(m => m.type === 'video');
+    const images = uniqueMedia.filter(m => m.type === 'image');
+    const finalMedia = videos.length > 0 ? videos : images;
+
+    if (finalMedia.length === 0) {
+      throw new Error("Tidak ada media yang ditemukan di Threads post");
+    }
+
+    // Build thumbnail list from images (use as fallback for video thumbnails)
+    const imageUrls = images.map(m => m.thumbnail || m.url);
+    const thumbCandidates = Object.values(thumbnailMap).concat(imageUrls);
+
+    const mediaItems = finalMedia.map((item, index) => {
+      // For videos: use poster from DOM, or first available image as thumbnail
+      let thumb = item.thumbnail || null;
+      if (!thumb && item.type === 'video') {
+        // Try to find a matching thumbnail
+        thumb = thumbCandidates[index] || thumbCandidates[0] || null;
+      }
+      if (!thumb && item.type === 'image') {
+        thumb = item.url;
+      }
+
+      return {
+        type: item.type,
+        url: item.url,
+        thumbnail: thumb || item.url,
+        width: null,
+        height: null,
+        duration: null,
+        ext: item.type === 'video' ? 'mp4' : 'jpg',
+        formats: [{
+          type: item.type,
+          quality: finalMedia.length > 1 ? `Item ${index + 1}` : (item.type === 'video' ? 'Video' : 'Foto'),
+          url: item.url,
+          ext: item.type === 'video' ? 'mp4' : 'jpg'
+        }]
+      };
+    });
+
+    const hasVideo = mediaItems.some(m => m.type === 'video');
+    return {
+      platform: "threads",
+      type: hasVideo ? "video" : (mediaItems.length > 1 ? "playlist" : "image"),
+      shortcode: url.match(/\/post\/([\w-]+)/)?.[1] || "threads",
+      author: authorName,
+      caption: `Threads post dari @${authorName}`,
+      title: `Threads post dari @${authorName}`,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems,
+      source: "playwright-threads"
+    };
+
+  } catch (err) {
+    if (browser) { try { await browser.close(); } catch {} }
+    throw new Error(`Threads Playwright gagal: ${err.message}`);
+  }
 }
 
 // ─── Instagram Embed API (untuk foto) ──────────────────────────────────────────
@@ -5195,6 +5415,38 @@ async function scrapeMedia(url) {
       console.warn(`[Scraper] Semua metode YouTube gagal: ${err.message}`);
       throw new Error(err.message);
     }
+  }
+
+  // Threads: Gunakan yt-dlp (native support) + Playwright fallback untuk carousel
+  if (platform === "threads") {
+    const ytdlpAvail = await checkYtDlp();
+    
+    // Method 1: yt-dlp (best for video, supports resolution selection)
+    if (ytdlpAvail) {
+      try {
+        const threadsResult = await scrapeViaYtDlp(url, 'threads');
+        const hasValidMedia = threadsResult.mediaItems.some(item => item.url && item.url.length > 10);
+        if (hasValidMedia) {
+          console.log(`[Scraper] Threads berhasil via yt-dlp (${threadsResult.mediaItems.length} item)`);
+          return threadsResult;
+        }
+      } catch (e) {
+        console.warn(`[Scraper] Threads yt-dlp gagal: ${e.message.substring(0, 100)}`);
+      }
+    }
+
+    // Method 2: Playwright (for photo carousel yang yt-dlp tidak bisa extract)
+    try {
+      const playwrightResult = await scrapeThreadsViaPlaywright(url);
+      if (playwrightResult.mediaItems.length > 0) {
+        console.log(`[Scraper] Threads berhasil via Playwright (${playwrightResult.mediaItems.length} item)`);
+        return playwrightResult;
+      }
+    } catch (e) {
+      console.warn(`[Scraper] Threads Playwright gagal: ${e.message.substring(0, 100)}`);
+    }
+
+    throw new Error("Tidak bisa download Threads post. Mungkin post dihapus atau private.");
   }
 
   // Cek yt-dlp tersedia
