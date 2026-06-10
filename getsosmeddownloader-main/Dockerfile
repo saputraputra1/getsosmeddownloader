@@ -9,10 +9,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create virtual environment and install yt-dlp
+# Create virtual environment and install yt-dlp + instaloader
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip3 install --no-cache-dir -U yt-dlp
+RUN pip3 install --no-cache-dir -U yt-dlp instaloader
 
 WORKDIR /app
 
@@ -23,9 +23,13 @@ RUN npm install --omit=dev
 # Copy the rest of the application
 COPY . .
 
-# Expose port (Render/HuggingFace can overwrite this environment variable)
+# Install Playwright Chromium browser (for Instagram/Pinterest scraping)
+RUN npx playwright install chromium --with-deps
+
+# Expose port (Railway/Render/HuggingFace can overwrite this)
 EXPOSE 3000
 
 ENV PORT=3000
 
-CMD ["node", "server.js"]
+# Update yt-dlp at startup (Instagram sering ganti format)
+CMD ["sh", "-c", "yt-dlp -U --quiet 2>/dev/null || true && node server.js"]

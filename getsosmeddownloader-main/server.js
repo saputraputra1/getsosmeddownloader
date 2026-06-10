@@ -8,7 +8,14 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const path = require("path");
+const fs = require("fs");
 const { scrapeMedia, scrapeTikTokStoriesByUsername, detectPlatform, isInstagramStoryUrl, checkYtDlp, PLATFORMS } = require("./scraper");
+
+// Ensure temp_downloads directory exists (for yt-dlp downloaded files)
+const tempDir = path.join(__dirname, "temp_downloads");
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +52,7 @@ function isAllowedCdnUrl(urlString) {
       /^video[\w-]*\.cdninstagram\.com$/,
       /^scontent[\w-]*\.[\w-]+\.fbcdn\.net$/,  // scontent-xxx.xx.fbcdn.net (various regions)
       /^instagram\.[\w-]+\.fbcdn\.net$/,
+      /^instagram\.[\w-]+\.[\w-]+\.fbcdn\.net$/,  // instagram.fpnk3-1.fna.fbcdn.net (regional CDN baru),
       // Facebook CDN
       /\.facebook\.com$/,
       /^video[\w-]*\.xx\.fbcdn\.net$/,
@@ -91,6 +99,11 @@ function isAllowedCdnUrl(urlString) {
       /\.adminforge\.de$/,
       /\.drgns\.space$/,
       /\.garudalinux\.org$/,
+      /\.reallyaweso\.me$/,
+      /\.no-logs\.com$/,
+      /\.puffyan\.us$/,
+      /\.tokhmi\.xyz$/,
+      /^piped\.video$/,
       // RapidAPI
       /\.rapidapi\.com$/,
       /\.p\.rapidapi\.com$/,
@@ -107,6 +120,9 @@ function isAllowedCdnUrl(urlString) {
       /^v1\.pinimg\.com$/,
       /^s\.pinimg\.com$/,
       /^media[\w-]*\.pinimg\.com$/,
+      // Local server (for yt-dlp downloaded files)
+      /^localhost$/,
+      /^127\.0\.0\.1$/,
     ];
     return allowedPatterns.some((pat) => pat.test(host));
   } catch {
@@ -152,6 +168,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/temp", express.static(path.join(__dirname, "temp_downloads")));
 
 // ─── Rate Limiter (in-memory) ────────────────────────────────────────────────
 // Untuk production, ganti dengan express-rate-limit + Redis
@@ -805,6 +822,27 @@ app.get("/api/proxy", async (req, res) => {
     return res.status(400).json({ error: "Parameter url diperlukan" });
   }
 
+  // Jika URL adalah file lokal (dari yt-dlp), serve langsung dari filesystem
+  // Support: relative URL (/temp/xxx.mp4) dan absolute URL (http://localhost:3000/temp/xxx.mp4)
+  const isLocalFile = url.startsWith('/temp/') || (() => {
+    try { const u = new URL(url); return u.hostname === 'localhost' || u.hostname === '127.0.0.1'; } catch { return false; }
+  })();
+  
+  if (isLocalFile) {
+    const localPath = url.startsWith('/temp/') ? url : (() => { try { return new URL(url).pathname; } catch { return ''; } })();
+    if (localPath.startsWith('/temp/')) {
+      const filePath = path.join(__dirname, 'temp_downloads', path.basename(localPath));
+      if (require('fs').existsSync(filePath)) {
+        const fn = filename || path.basename(filePath);
+        res.setHeader('Content-Disposition', `attachment; filename="${fn}"`);
+        res.setHeader('Content-Type', 'video/mp4');
+        return require('fs').createReadStream(filePath).pipe(res);
+      } else {
+        return res.status(404).json({ error: "File tidak ditemukan" });
+      }
+    }
+  }
+
   // Validasi domain CDN dengan parsing URL yang aman
   if (!isAllowedCdnUrl(url)) {
     return res.status(403).json({ error: "Domain tidak diizinkan" });
@@ -843,7 +881,7 @@ app.get("/api/proxy", async (req, res) => {
       return axios.get(url, {
         responseType: "stream",
         headers: fetchHeaders,
-        timeout: 120000,
+        timeout: 300000,
         maxRedirects: 5,
         decompress: false,
         validateStatus: (status) => status >= 200 && status < 400,

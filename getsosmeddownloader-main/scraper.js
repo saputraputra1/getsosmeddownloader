@@ -619,6 +619,396 @@ async function scrapeViaCookiesRetry(url, platform) {
   throw new Error(`Semua metode cookies browser gagal untuk ${platform}`);
 }
 
+// ─── SnapInsta API (via sssave.app) ─────────────────────────────────────────────
+// API ini sangat stabil untuk foto tunggal dan carousel/slide Instagram
+
+async function scrapeInstagramViaSnapinsta(url) {
+  console.log("[Scraper] Mencoba SnapInsta (sssave.app) untuk Instagram...");
+  
+  try {
+    // Step 1: Ambil token dari halaman utama
+    const homeResp = await axios.get("https://snapinsta.app/", {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      timeout: 10000
+    });
+    
+    const html = homeResp.data;
+    const tokenMatch = html.match(/name="token"\s+value="([^"]+)"/);
+    const token = tokenMatch ? tokenMatch[1] : null;
+    
+    // Step 2: Submit URL ke API
+    const params = new URLSearchParams();
+    params.append("url", url);
+    params.append("token", token || "");
+    
+    const apiResp = await axios.post("https://snapinsta.app/action.php", params, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://snapinsta.app",
+        "Referer": "https://snapinsta.app/",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      timeout: 15000
+    });
+    
+    const data = apiResp.data;
+    if (!data || (!data.url && !data.data)) {
+      throw new Error("SnapInsta tidak mengembalikan hasil");
+    }
+    
+    const shortcode = extractShortcode(url) || "snapinsta";
+    const mediaItems = [];
+    
+    // Handle single photo
+    if (data.url && typeof data.url === 'string') {
+      const isVideo = data.url.includes('.mp4') || data.type === 'video';
+      mediaItems.push({
+        type: isVideo ? "video" : "image",
+        url: data.url,
+        thumbnail: data.thumbnail || data.url,
+        width: null, height: null, duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{ type: isVideo ? "video" : "image", quality: "HD", url: data.url, ext: isVideo ? 'mp4' : 'jpg' }]
+      });
+    }
+    
+    // Handle carousel/multiple media
+    if (data.data && Array.isArray(data.data)) {
+      data.data.forEach((item, i) => {
+        const mediaUrl = item.url || item.thumbnail_url || item.display_url;
+        if (!mediaUrl) return;
+        const isVideo = (item.type === 'video') || mediaUrl.includes('.mp4');
+        mediaItems.push({
+          type: isVideo ? "video" : "image",
+          url: mediaUrl,
+          thumbnail: item.thumbnail_url || mediaUrl,
+          width: null, height: null, duration: null,
+          ext: isVideo ? 'mp4' : 'jpg',
+          formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: mediaUrl, ext: isVideo ? 'mp4' : 'jpg' }]
+        });
+      });
+    }
+    
+    if (mediaItems.length === 0) throw new Error("Tidak ada media dari SnapInsta");
+    
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+      shortcode,
+      author: data.author || "Instagram User",
+      caption: data.caption || "",
+      title: "",
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: "snapinsta",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`SnapInsta gagal: ${err.message}`);
+  }
+}
+
+// ─── SaveIG API (saveig.app) ────────────────────────────────────────────────────
+// API publik stabil, support carousel Instagram
+
+async function scrapeInstagramViaSaveIG(url) {
+  console.log("[Scraper] Mencoba SaveIG (saveig.app) untuk Instagram...");
+  
+  try {
+    // Gunakan instagramsave API yang sangat stabil
+    const apiUrl = `https://saveig.app/api?url=${encodeURIComponent(url)}`;
+    
+    const resp = await axios.get(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://saveig.app/"
+      },
+      timeout: 15000
+    });
+    
+    const data = resp.data;
+    if (!data || !data.success || !data.medias || data.medias.length === 0) {
+      throw new Error("SaveIG tidak mengembalikan hasil valid");
+    }
+    
+    const shortcode = extractShortcode(url) || "saveig";
+    const mediaItems = data.medias.map((item, i) => {
+      const isVideo = item.type === 'video' || (item.url && item.url.includes('.mp4'));
+      return {
+        type: isVideo ? "video" : "image",
+        url: item.url,
+        thumbnail: item.thumbnail || item.url,
+        width: null, height: null, duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: item.url, ext: isVideo ? 'mp4' : 'jpg' }]
+      };
+    });
+    
+    if (mediaItems.length === 0) throw new Error("Tidak ada media dari SaveIG");
+    
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+      shortcode,
+      author: data.author || "Instagram User",
+      caption: data.caption || "",
+      title: "",
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: "saveig",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`SaveIG gagal: ${err.message}`);
+  }
+}
+
+// ─── SnapInstagram API (snapinst.app) ─────────────────────────────────────────
+// API stabil, support carousel dengan JSON response
+
+async function scrapeInstagramViaSnapInst(url) {
+  console.log("[Scraper] Mencoba SnapInst (snapinst.app) untuk Instagram...");
+
+  try {
+    const resp = await axios.post(
+      "https://snapinst.app/action.php",
+      new URLSearchParams({ url, lang: "id" }).toString(),
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Origin": "https://snapinst.app",
+          "Referer": "https://snapinst.app/",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        timeout: 15000
+      }
+    );
+
+    const data = resp.data;
+    if (!data) throw new Error("SnapInst tidak mengembalikan data");
+
+    const shortcode = extractShortcode(url) || "snapinst";
+    const mediaItems = [];
+
+    // SnapInst mengembalikan JSON array atau objek dengan field media
+    let mediaArr = null;
+    if (Array.isArray(data)) mediaArr = data;
+    else if (data.data && Array.isArray(data.data)) mediaArr = data.data;
+    else if (data.medias && Array.isArray(data.medias)) mediaArr = data.medias;
+    else if (data.result && Array.isArray(data.result)) mediaArr = data.result;
+
+    if (!mediaArr || mediaArr.length === 0) throw new Error("SnapInst: tidak ada media di response");
+
+    mediaArr.forEach((item, i) => {
+      const mediaUrl = item.url || item.download_url || item.src;
+      if (!mediaUrl) return;
+      const isVideo = item.type === 'video' || (mediaUrl && mediaUrl.includes('.mp4'));
+      mediaItems.push({
+        type: isVideo ? "video" : "image",
+        url: mediaUrl,
+        thumbnail: item.thumbnail || item.thumb || mediaUrl,
+        width: null, height: null, duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: mediaUrl, ext: isVideo ? 'mp4' : 'jpg' }]
+      });
+    });
+
+    if (mediaItems.length === 0) throw new Error("SnapInst: tidak ada media valid");
+
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+      shortcode,
+      author: data.username || "Instagram User",
+      caption: data.caption || "",
+      title: "",
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: "snapinst",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`SnapInst gagal: ${err.message}`);
+  }
+}
+
+// ─── SSSSave API (ssssave.net) ─────────────────────────────────────────────────
+// API populer, support carousel Instagram (foto slide)
+
+async function scrapeInstagramViaSSSSave(url) {
+  console.log("[Scraper] Mencoba SSSSave untuk Instagram...");
+  
+  try {
+    const resp = await axios.post(
+      "https://ssssave.net/api/ajaxSearch",
+      new URLSearchParams({ q: url, t: "media", lang: "en" }).toString(),
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "Origin": "https://ssssave.net",
+          "Referer": "https://ssssave.net/",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        timeout: 15000
+      }
+    );
+    
+    const data = resp.data;
+    if (!data || data.status !== "ok" || !data.data) {
+      throw new Error("SSSSave tidak mengembalikan hasil");
+    }
+    
+    const shortcode = extractShortcode(url) || "ssssave";
+    const htmlData = data.data;
+    const mediaItems = [];
+    const seenUrls = new Set();
+
+    // Helper: filter URL yang valid (bukan logo/blank/thumbnail kecil)
+    function isValidMediaUrl(u) {
+      if (!u || u.length < 20) return false;
+      // Skip logo Instagram atau foto profil
+      if (/profile_pic|\/v\/t51\.2885-19\/|\/v\/t51\.2885-15\//.test(u)) return false;
+      // Skip thumbnail kecil
+      if (/s150x150|s320x320|s240x240|s44x44|s64x64|150x150|44x44/.test(u)) return false;
+      // Skip static assets
+      if (/static\.cdninstagram\.com|fbstatic-a\.akamaihd\.net/.test(u)) return false;
+      return true;
+    }
+    
+    // Metode 1: Parse link download langsung (prioritas utama)
+    const linkRegex = /href="(https?:\/\/[^"]+\.(jpg|jpeg|png|mp4|webp)[^"]*)"[^>]*download/gi;
+    let m;
+    while ((m = linkRegex.exec(htmlData)) !== null) {
+      const cleanUrl = m[1].replace(/&amp;/g, '&');
+      if (isValidMediaUrl(cleanUrl) && !seenUrls.has(cleanUrl)) {
+        seenUrls.add(cleanUrl);
+        mediaItems.push(cleanUrl);
+      }
+    }
+
+    // Metode 2: Fallback — cari semua href CDN Instagram
+    if (mediaItems.length === 0) {
+      const fallbackRegex = /href="(https?:\/\/(?:scontent[\w.-]*\.cdninstagram\.com|scontent[\w.-]*\.fbcdn\.net|instagram\.[\w-]+\.fna\.fbcdn\.net)[^"]+)"[^>]*(?:download|class="[^"]*btn)/gi;
+      while ((m = fallbackRegex.exec(htmlData)) !== null) {
+        const cleanUrl = m[1].replace(/&amp;/g, '&');
+        if (isValidMediaUrl(cleanUrl) && !seenUrls.has(cleanUrl)) {
+          seenUrls.add(cleanUrl);
+          mediaItems.push(cleanUrl);
+        }
+      }
+    }
+
+    // Metode 3: Cari semua src CDN Instagram dari tag <img> yang bukan thumbnail
+    if (mediaItems.length === 0) {
+      const imgRegex = /src="(https?:\/\/(?:scontent[\w.-]*\.cdninstagram\.com|scontent[\w.-]*\.fbcdn\.net)[^"]+)"/gi;
+      while ((m = imgRegex.exec(htmlData)) !== null) {
+        const cleanUrl = m[1].replace(/&amp;/g, '&');
+        if (isValidMediaUrl(cleanUrl) && !seenUrls.has(cleanUrl)) {
+          seenUrls.add(cleanUrl);
+          mediaItems.push(cleanUrl);
+        }
+      }
+    }
+    
+    if (mediaItems.length === 0) throw new Error("Tidak ada media ditemukan dari SSSSave");
+    
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : (mediaItems[0].includes('.mp4') ? "video" : "image"),
+      shortcode,
+      author: "Instagram User",
+      caption: "",
+      title: "",
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems: mediaItems.map((mediaUrl, i) => {
+        const isVideo = mediaUrl.includes('.mp4');
+        return {
+          type: isVideo ? "video" : "image",
+          url: mediaUrl,
+          thumbnail: mediaUrl,
+          width: null, height: null, duration: null,
+          ext: isVideo ? 'mp4' : 'jpg',
+          formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: mediaUrl, ext: isVideo ? 'mp4' : 'jpg' }]
+        };
+      }),
+      source: "ssssave",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`SSSSave gagal: ${err.message}`);
+  }
+}
+
+// ─── InstagramSave API via igram.world ──────────────────────────────────────────
+// Support carousel dengan reliable JSON response
+
+async function scrapeInstagramViaIgram(url) {
+  console.log("[Scraper] Mencoba igram.world untuk Instagram...");
+  
+  try {
+    const resp = await axios.post(
+      "https://igram.world/api/convert",
+      JSON.stringify({ url, lang: "id" }),
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Content-Type": "application/json",
+          "Origin": "https://igram.world",
+          "Referer": "https://igram.world/",
+        },
+        timeout: 15000
+      }
+    );
+    
+    const data = resp.data;
+    if (!data || !data.media || data.media.length === 0) {
+      throw new Error("igram tidak mengembalikan media");
+    }
+    
+    const shortcode = extractShortcode(url) || "igram";
+    const mediaItems = data.media.map((item, i) => {
+      const isVideo = item.type === 'video' || (item.url && item.url.includes('.mp4'));
+      return {
+        type: isVideo ? "video" : "image",
+        url: item.url,
+        thumbnail: item.thumbnail || item.url,
+        width: item.width || null, height: item.height || null, duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: item.url, ext: isVideo ? 'mp4' : 'jpg' }]
+      };
+    });
+    
+    if (mediaItems.length === 0) throw new Error("Tidak ada media dari igram");
+    
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+      shortcode,
+      author: data.author || "Instagram User",
+      caption: data.caption || "",
+      title: "",
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: "igram",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`igram gagal: ${err.message}`);
+  }
+}
+
 // ─── RapidAPI Instagram (Cobalt wrapper) ──────────────────────────────────────
 
 async function scrapeViaRapidAPI(url) {
@@ -655,7 +1045,7 @@ async function scrapeViaRapidAPI(url) {
     mediaItems.push({
       type: isVideo ? "video" : "image",
       url: item.url,
-      thumbnail: item.thumb || item.url,
+      thumbnail: item.url, // Gunakan URL asli Instagram CDN (thumb dari RapidAPI adalah proxy unreliable)
       width: null,
       height: null,
       duration: null,
@@ -666,13 +1056,39 @@ async function scrapeViaRapidAPI(url) {
     });
   });
 
+  // Fetch real username via embed page (works without login)
+  let realAuthor = "Instagram User";
+  let realCaption = "";
+  try {
+    const embedResp = await axios.get(
+      `https://www.instagram.com/p/${extractShortcode(url)}/embed/`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }, timeout: 8000 }
+    );
+    const html = embedResp.data;
+    const usernameMatch = html.match(/class="Username">([^<]+)/);
+    if (usernameMatch?.[1]) realAuthor = usernameMatch[1].trim();
+    // Try to get caption from embed
+    const captionMatch = html.match(/class="Caption"[^>]*>([^<]+)/);
+    if (captionMatch?.[1]) realCaption = captionMatch[1].trim();
+  } catch (e) {
+    // Fallback: try oEmbed API
+    try {
+      const oembedResp = await axios.get(
+        `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}&maxwidth=640`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }
+      );
+      if (oembedResp.data?.author_name) realAuthor = oembedResp.data.author_name;
+      if (oembedResp.data?.title) realCaption = oembedResp.data.title;
+    } catch (e2) {}
+  }
+
   return {
     platform: "instagram",
     type: hasVideo ? "video" : "playlist",
     shortcode: extractShortcode(url) || "rapidapi",
-    author: "Instagram User",
-    caption: "",
-    title: "",
+    author: realAuthor,
+    caption: realCaption,
+    title: realCaption,
     timestamp: null,
     likeCount: 0,
     commentCount: 0,
@@ -779,47 +1195,28 @@ async function scrapeInstagramViaEmbed(url) {
   }
 }
 
-// ─── Instagram via @mrnima/instagram-downloader ──────────────────────────────────
+// ─── Instagram via @bochilteam/scraper-instagram ────────────────────────────────
 
-async function scrapeInstagramViaMrnima(url) {
-  console.log("[Scraper] Mencoba @mrnima/instagram-downloader...");
+async function scrapeInstagramViaBochil(url) {
+  console.log("[Scraper] Mencoba @bochilteam/scraper-instagram (igdownloader.app)...");
   
   try {
-    const instagramDownloader = require('@mrnima/instagram-downloader');
+    const { instagramdl } = require('@bochilteam/scraper-instagram');
     
-    const result = await instagramDownloader(url);
+    const results = await instagramdl(url);
     
-    if (!result || !result.download_url) {
-      throw new Error("No download URL returned from @mrnima/instagram-downloader");
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      throw new Error("Tidak ada media dikembalikan dari @bochilteam/scraper-instagram");
     }
     
-    const shortcode = extractShortcode(url) || "mrnima";
-    let username = "Instagram User";
+    const shortcode = extractShortcode(url) || "bochil";
     
-    // Extract username from result if available
-    if (result.username) {
-      username = result.username;
-    }
-    
-    // Determine if it's video or image
-    const isVideo = result.type === 'video' || result.download_url.includes('.mp4');
-    
-    return {
-      platform: "instagram",
-      type: isVideo ? "video" : "image",
-      shortcode: shortcode,
-      author: username,
-      caption: result.caption || "",
-      title: result.title || "",
-      timestamp: null,
-      likeCount: 0,
-      commentCount: 0,
-      viewCount: 0,
-      duration: null,
-      mediaItems: [{
+    const mediaItems = results.map((item) => {
+      const isVideo = item.type === 'video' || (item.url && item.url.includes('.mp4'));
+      return {
         type: isVideo ? "video" : "image",
-        url: result.download_url,
-        thumbnail: result.thumbnail_url || result.download_url,
+        url: item.url,
+        thumbnail: item.thumbnail || item.url,
         width: null,
         height: null,
         duration: null,
@@ -827,10 +1224,92 @@ async function scrapeInstagramViaMrnima(url) {
         formats: [{
           type: isVideo ? "video" : "image",
           quality: "HD",
-          url: result.download_url,
+          url: item.url,
           ext: isVideo ? 'mp4' : 'jpg'
         }]
-      }],
+      };
+    });
+
+    const firstItem = mediaItems[0];
+    
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : firstItem.type,
+      shortcode: shortcode,
+      author: "Instagram User",
+      caption: "",
+      title: "",
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems,
+      source: "@bochilteam/scraper-instagram",
+      warning: null
+    };
+  } catch (err) {
+    throw new Error(`@bochilteam/scraper-instagram gagal: ${err.message}`);
+  }
+}
+
+// ─── Instagram via @mrnima/instagram-downloader ──────────────────────────────────
+
+async function scrapeInstagramViaMrnima(url) {
+  console.log("[Scraper] Mencoba @mrnima/instagram-downloader...");
+  
+  try {
+    // FIX: Package exports a NAMED export `instagramDownload`, not a default function.
+    // The old code did:  const instagramDownloader = require('...');  await instagramDownloader(url);
+    // That grabs the module object and tries to call it as a function → "is not a function".
+    const { instagramDownload } = require('@mrnima/instagram-downloader');
+    
+    const result = await instagramDownload(url);
+    
+    // FIX: The package returns { status: bool, result: [{ type, link }] }
+    // NOT { download_url }.  Old check `!result.download_url` always threw.
+    if (!result || !result.status || !Array.isArray(result.result) || result.result.length === 0) {
+      throw new Error("No media returned from @mrnima/instagram-downloader");
+    }
+    
+    const shortcode = extractShortcode(url) || "mrnima";
+    const username = "Instagram User";
+    
+    // Map every item in result.result → mediaItems
+    const mediaItems = result.result.map((item) => {
+      const isVideo = item.type === 'video' || (item.link && item.link.includes('.mp4'));
+      return {
+        type: isVideo ? "video" : "image",
+        url: item.link,
+        thumbnail: item.link,
+        width: null,
+        height: null,
+        duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{
+          type: isVideo ? "video" : "image",
+          quality: "HD",
+          url: item.link,
+          ext: isVideo ? 'mp4' : 'jpg'
+        }]
+      };
+    });
+
+    const firstItem = mediaItems[0];
+    
+    return {
+      platform: "instagram",
+      type: firstItem.type,
+      shortcode: shortcode,
+      author: username,
+      caption: "",
+      title: "",
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems,
       source: "@mrnima/instagram-downloader",
       warning: null
     };
@@ -954,6 +1433,469 @@ async function scrapeInstagramViaInstaloader(url) {
   });
 }
 
+// ─── Instagram Direct API (Priority method untuk foto) ────────────────────────────
+// Menggunakan 4 metode langsung ke Instagram: EmbedAPI, GraphQL, HTML Scrape, oEmbed
+// Ini adalah metode PRIORITAS UTAMA untuk foto Instagram.
+
+async function scrapeInstagramViaDirectAPI(url) {
+  console.log("[Scraper] Mencoba Direct API (EmbedAPI + GraphQL + HTML Scrape + oEmbed)...");
+
+  const shortcode = extractShortcode(url);
+  if (!shortcode) throw new Error("Shortcode tidak ditemukan dari URL");
+
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+  // Helper: deduplicate items by URL
+  function dedupeItems(items) {
+    const seen = new Set();
+    return items.filter(item => {
+      if (seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    });
+  }
+
+  // Helper: map raw items ke format internal scraper
+  function toMediaItems(rawItems) {
+    return rawItems.map((item, i) => ({
+      type: item.type,
+      url: item.url,
+      thumbnail: item.url,
+      width: null,
+      height: null,
+      duration: null,
+      ext: item.type === "video" ? "mp4" : "jpg",
+      formats: [{
+        type: item.type,
+        quality: item.type === "video" ? "HD" : (i === 0 ? "HD" : `HD Foto ${i + 1}`),
+        url: item.url,
+        ext: item.type === "video" ? "mp4" : "jpg"
+      }]
+    }));
+  }
+
+  // Helper: parse node media (sama persis dengan server.js lama)
+  function extractFromMediaNode(media) {
+    const items = [];
+    const carousel = media.carousel_media || media.edge_sidecar_to_children?.edges?.map(e => e.node);
+    if (carousel && carousel.length > 0) {
+      for (const node of carousel) {
+        if (node.video_versions?.length > 0) {
+          items.push({ type: "video", url: node.video_versions[0].url });
+        } else if (node.image_versions2?.candidates?.length > 0) {
+          items.push({ type: "image", url: node.image_versions2.candidates[0].url });
+        } else if (node.video_url) {
+          items.push({ type: "video", url: node.video_url });
+        } else if (node.display_url) {
+          const best = node.display_resources?.[node.display_resources.length - 1]?.src || node.display_url;
+          items.push({ type: "image", url: best });
+        }
+      }
+      return items;
+    }
+    if (media.video_versions?.length > 0) { items.push({ type: "video", url: media.video_versions[0].url }); return items; }
+    if (media.video_url) { items.push({ type: "video", url: media.video_url }); return items; }
+    if (media.image_versions2?.candidates?.length > 0) { items.push({ type: "image", url: media.image_versions2.candidates[0].url }); return items; }
+    if (media.display_url) {
+      const best = media.display_resources?.[media.display_resources.length - 1]?.src || media.display_url;
+      items.push({ type: "image", url: best });
+      return items;
+    }
+    return items;
+  }
+
+  function cleanUrl(u) {
+    return u.replace(/\\u0026/g, "&").replace(/\\\//g, "/").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+
+  function isThumbnail(u) {
+    // Skip berdasarkan ukuran kecil
+    if (/s150x150|s320x320|s640x640|s480x480|s240x240|s44x44|s64x64|s32x32/.test(u)) return true;
+    // Skip foto profil
+    if (/profile_pic|_nc_sid=f7ccc5/.test(u)) return true;
+    // Skip path profil /v/t51.2885-19/
+    if (/\/v\/t51\.2885-19\//.test(u)) return true;
+    // Skip path logo/UI Instagram /v/t51.2885-15/ (angka 2885 = aset UI/logo)
+    if (/\/v\/t51\.2885-15\//.test(u)) return true;
+    // Skip static assets
+    if (/\/static\/|\/rsrc\.php|\.png.*[?&]_nc_cat=1[^0-9]/.test(u)) return true;
+    // Skip aset logo Instagram (dimensi sangat kecil dalam path)
+    if (/\/[0-9]+x[0-9]+\//.test(u)) {
+      const dimMatch = u.match(/\/(\d+)x(\d+)\//);
+      if (dimMatch && parseInt(dimMatch[1]) <= 320 && parseInt(dimMatch[2]) <= 320) return true;
+    }
+    // Skip URL yang mengandung "logo" atau "icon"
+    if (/\/logo[_-]|[_-]logo\/|\/icon[_-]|[_-]icon\//.test(u)) return true;
+    return false;
+  }
+
+  // Cek apakah URL adalah foto konten post (bukan logo/UI)
+  // Foto post pakai path /v/t51.XXXXX-15/ dimana XXXXX != 2885
+  // Video pakai path /v/t50.XXXXX-XX/
+  function isPostMedia(u) {
+    try {
+      const path = new URL(u).pathname;
+      // Foto post: t51 dengan type number selain 2885
+      if (/\/v\/t51\.(?!2885)\d+-15\//.test(path)) return true;
+      // Video post: t50
+      if (/\/v\/t50\./.test(path)) return true;
+      // Format lama tanpa path /v/
+      if (/\/(e15|e35)\//.test(u)) return true;
+      // Kalau ada efg param dengan CAROUSEL atau IMAGE = pasti foto post
+      if (u.includes('CAROUSEL') || u.includes('_nc_cat=')) return true;
+      // Format URL CDN Instagram yang punya _nc_ht param (CDN signed URL untuk konten)
+      if (u.includes('_nc_ht=') && !u.includes('profile_pic')) return true;
+      // Jika URL CDN Instagram tidak cocok pola t51/t50, tetapi mengandung ig_cache_key = konten post
+      if (u.includes('ig_cache_key=')) return true;
+      return false;
+    } catch { return false; }
+  }
+
+  // Cek apakah URL adalah CDN Instagram yang valid
+  // Format domain CDN Instagram yang diketahui:
+  // - scontent*.fbcdn.net  /  scontent*.cdninstagram.com
+  // - instagram.f[kode]-[n].fna.fbcdn.net  (regional CDN baru)
+  // - *.cdninstagram.com
+  function isInstagramCdn(u) {
+    try {
+      const host = new URL(u).hostname.toLowerCase();
+      return (
+        /^scontent[\w-]*\.fbcdn\.net$/.test(host) ||
+        /^scontent[\w-]*\.cdninstagram\.com$/.test(host) ||
+        /^instagram\.[\w]+-\d+\.fna\.fbcdn\.net$/.test(host) ||
+        /^[\w-]+\.cdninstagram\.com$/.test(host) ||
+        /^video[\w-]*\.fbcdn\.net$/.test(host) ||
+        host.endsWith('.fbcdn.net') ||
+        host.endsWith('.cdninstagram.com')
+      );
+    } catch { return false; }
+  }
+
+  // ── Metode A: EmbedAPI (?__a=1) ──
+  async function tryEmbedAPI() {
+    const resp = await axios.get(`https://www.instagram.com/p/${shortcode}/?__a=1&__d=dis`, {
+      headers: { "User-Agent": UA, "Accept": "application/json, text/html" },
+      timeout: 10000
+    });
+    const media = resp.data?.graphql?.shortcode_media || resp.data?.items?.[0];
+    if (!media) return null;
+    return extractFromMediaNode(media);
+  }
+
+  // ── Metode B: GraphQL API (dengan header lengkap dari DevTools) ──
+  async function tryGraphQLAPI() {
+    // Ambil lsd token dulu dari halaman HTML (wajib untuk GraphQL)
+    let lsd = "LSD_TOKEN";
+    let fb_dtsg = null;
+    let __rev = "1041135829";
+    try {
+      const homeResp = await axios.get(`https://www.instagram.com/p/${shortcode}/`, {
+        headers: { "User-Agent": UA, "Accept": "text/html" },
+        timeout: 10000
+      });
+      const html = homeResp.data;
+
+      // Extract lsd
+      const lsdMatch = html.match(/"LSD",\[\],\{"token":"([^"]+)"\}/) ||
+                       html.match(/"lsd":"([^"]+)"/) ||
+                       html.match(/lsd[^"]*"[^"]*"[^"]*"([^"]{10,30})"/);
+      if (lsdMatch?.[1]) lsd = lsdMatch[1];
+
+      // Extract fb_dtsg
+      const dtsgMatch = html.match(/"dtsg":\{"token":"([^"]+)"/) ||
+                        html.match(/"token":"([^"]+)","ttl"/) ||
+                        html.match(/fb_dtsg[^"]*"[^"]*"([^"]{20,60})"/);
+      if (dtsgMatch?.[1]) fb_dtsg = dtsgMatch[1];
+
+      // Extract __rev
+      const revMatch = html.match(/"client_revision":(\d+)/);
+      if (revMatch?.[1]) __rev = revMatch[1];
+    } catch (e) {}
+
+    // Hitung jazoest dari fb_dtsg
+    const jazoest = fb_dtsg
+      ? "2" + fb_dtsg.split("").reduce((s, c) => s + c.charCodeAt(0), 0)
+      : "26347";
+
+    const params = new URLSearchParams({
+      // Meta params (dari DevTools capture)
+      v:                           "17841416365540553",
+      __d:                         "www",
+      __user:                      "0",
+      __a:                         "1",
+      __req:                       "l",
+      __ccg:                       "GOOD",
+      __rev:                       __rev,
+      __comet_req:                 "7",
+      // Token keamanan
+      ...(fb_dtsg && { fb_dtsg }),
+      jazoest:                     jazoest,
+      lsd:                         lsd,
+      // GraphQL query
+      fb_api_caller_class:         "RelayModern",
+      fb_api_req_friendly_name:    "PolarisPostPageQuery",
+      doc_id:                      "8848219501932392",
+      server_timestamps:           "true",
+      variables:                   JSON.stringify({ shortcode }),
+    });
+
+    const resp = await axios.post(
+      "https://www.instagram.com/api/graphql",
+      params.toString(),
+      {
+        headers: {
+          "User-Agent":             UA,
+          "Content-Type":          "application/x-www-form-urlencoded",
+          "Accept":                "*/*",
+          "Accept-Language":       "en-US,en;q=0.9",
+          "Origin":                "https://www.instagram.com",
+          "Referer":               `https://www.instagram.com/p/${shortcode}/`,
+          "X-ASBD-ID":             "359341",
+          "X-CSRFToken":           lsd,
+          "X-FB-Friendly-Name":    "PolarisPostPageQuery",
+          "X-FB-LSD":              lsd,
+          "X-IG-App-ID":           "936619743392459",
+          "X-IG-Max-Touch-Points": "0",
+          "Sec-Fetch-Dest":        "empty",
+          "Sec-Fetch-Mode":        "cors",
+          "Sec-Fetch-Site":        "same-origin",
+        },
+        timeout: 15000
+      }
+    );
+
+    const media = resp.data?.data?.xdt_shortcode_media;
+    if (!media) return null;
+    return extractFromMediaNode(media);
+  }
+
+  // ── Metode B2: GraphQL dengan doc_id alternatif (carousel-specific) ──
+  async function tryGraphQLCarousel() {
+    // doc_id ini khusus untuk PolarisPostPageQuery yang mengembalikan carousel penuh
+    const DOC_IDS = [
+      "8848219501932392",   // PolarisPostPageQuery (default)
+      "9496029880496264",   // versi lain PolarisPostPageQuery
+      "17991233890457605",  // versi lama tapi masih aktif
+    ];
+
+    for (const doc_id of DOC_IDS) {
+      try {
+        const params = new URLSearchParams({
+          variables:                   JSON.stringify({ shortcode, __relay_internal__pv__PolarisFeedShareMenurelayprovider: false }),
+          doc_id,
+          fb_api_req_friendly_name:    "PolarisPostPageQuery",
+          server_timestamps:           "true",
+          __a:                         "1",
+          __user:                      "0",
+          __comet_req:                 "7",
+        });
+
+        const resp = await axios.post(
+          "https://www.instagram.com/api/graphql",
+          params.toString(),
+          {
+            headers: {
+              "User-Agent":          UA,
+              "Content-Type":        "application/x-www-form-urlencoded",
+              "Accept":              "*/*",
+              "Origin":              "https://www.instagram.com",
+              "Referer":             `https://www.instagram.com/p/${shortcode}/`,
+              "X-IG-App-ID":         "936619743392459",
+              "X-FB-LSD":            "AVqbxe3J_YA",
+              "X-ASBD-ID":           "359341",
+              "Sec-Fetch-Dest":      "empty",
+              "Sec-Fetch-Mode":      "cors",
+              "Sec-Fetch-Site":      "same-origin",
+            },
+            timeout: 12000
+          }
+        );
+
+        const media = resp.data?.data?.xdt_shortcode_media;
+        if (media) {
+          const items = extractFromMediaNode(media);
+          if (items.length > 0) return items;
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // ── Metode C: HTML Scrape ──
+  async function tryHTMLScrape() {
+    const resp = await axios.get(`https://www.instagram.com/p/${shortcode}/`, {
+      headers: {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      timeout: 15000
+    });
+    const html = resp.data;
+    const items = [];
+
+    // JSON-LD
+    const ldMatch = html.match(/<script type="application\/ld\+json"[^>]*>(.*?)<\/script>/s);
+    if (ldMatch) {
+      try {
+        const ld = JSON.parse(ldMatch[1]);
+        const arr = Array.isArray(ld) ? ld : [ld];
+        for (const obj of arr) {
+          if (obj.contentUrl) items.push({ type: "video", url: obj.contentUrl });
+          if (obj.url && obj["@type"] === "ImageObject") items.push({ type: "image", url: obj.url });
+          if (Array.isArray(obj.image)) obj.image.forEach(img => { if (img.url) items.push({ type: "image", url: img.url }); });
+        }
+        if (items.length > 0) return items;
+      } catch (e) {}
+    }
+
+    // Deep-search carousel dari semua blok JSON embedded di HTML
+    // Instagram menyimpan data di window.__additionalDataLoaded / require("TimeSliceImpl")
+    const jsonBlockRegex = /\{[^{}]*"carousel_media"[^{}]*\[.*?\]\s*\}/gs;
+    for (const m of html.matchAll(jsonBlockRegex)) {
+      try {
+        const obj = JSON.parse(m[0]);
+        const found = extractFromMediaNode(obj);
+        if (found.length > 1) return found; // carousel berhasil
+      } catch (e) {}
+    }
+
+    // Cari semua display_url — ini yang paling andal untuk carousel
+    // Instagram menyertakan satu display_url per foto dalam array carousel
+    // Support dua format: escaped (\/\/) dan normal (//)
+    const displayUrls = [];
+    const seenDisplay = new Set();
+    // Format escaped: "display_url":"https:\/\/..." (JSON di dalam JS string)
+    // Format normal:  "display_url":"https://..."
+    const displayPatternsStr = [
+      '"display_url":"(https?:\\/\\/[^"]+)"',  // escaped \/ \/
+      '"display_url":"(https?://[^"]+)"',           // normal //
+    ];
+    for (const patStr of displayPatternsStr) {
+      const re = new RegExp(patStr, 'g');
+      for (const m of html.matchAll(re)) {
+        const u = cleanUrl(m[1]);
+        if (isThumbnail(u)) continue;
+        if (u.includes("profile_pic")) continue;
+        if (!isInstagramCdn(u)) continue;
+        if (!isPostMedia(u)) continue;
+        if (seenDisplay.has(u)) continue;
+        seenDisplay.add(u);
+        displayUrls.push({ type: "image", url: u });
+      }
+    }
+    if (displayUrls.length > 0) return displayUrls;
+
+    // Regex CDN fallback — support semua domain CDN Instagram
+    // Termasuk format baru: instagram.f[kode]-[n].fna.fbcdn.net
+    const urlSet = new Set();
+    // Regex generik: tangkap semua URL dari domain fbcdn.net atau cdninstagram.com
+    const cdnRegex = /"(https:\/\/[^"]*\.(?:fbcdn\.net|cdninstagram\.com)[^"]*)"/g;
+    for (const m of html.matchAll(cdnRegex)) {
+      const u = cleanUrl(m[1]);
+      if (!isThumbnail(u) && isInstagramCdn(u) && isPostMedia(u)) urlSet.add(u);
+    }
+    // Juga tangkap dari key "url" saja
+    for (const m of html.matchAll(new RegExp('"url":"(https?://[^"]+)"', 'g'))) {
+      const u = cleanUrl(m[1]);
+      if (!isThumbnail(u) && isInstagramCdn(u) && isPostMedia(u)) urlSet.add(u);
+    }
+    for (const u of urlSet) items.push({ type: "image", url: u });
+    if (items.length > 0) return items;
+    return null;
+  }  // ── Metode D: oEmbed redirect ──
+  async function tryOEmbed() {
+    const resp = await axios.get(`https://www.instagram.com/p/${shortcode}/media/?size=l`, {
+      headers: { "User-Agent": UA },
+      maxRedirects: 5,
+      timeout: 10000,
+      validateStatus: s => s < 400
+    });
+    const finalUrl = resp.request?.res?.responseUrl || resp.request?.responseURL || "";
+    if (finalUrl && (finalUrl.includes("fbcdn") || finalUrl.includes("cdninstagram"))) {
+      const ct = resp.headers["content-type"] || "";
+      return [{ type: ct.includes("video") ? "video" : "image", url: finalUrl }];
+    }
+    return null;
+  }
+
+  // Jalankan semua metode secara paralel
+  const results = await Promise.allSettled([
+    tryEmbedAPI(),
+    tryGraphQLAPI(),
+    tryGraphQLCarousel(),
+    tryHTMLScrape(),
+    tryOEmbed()
+  ]);
+
+  // Kumpulkan semua hasil yang valid, lalu gabungkan semua URL unik
+  // agar carousel dengan banyak foto tidak kehilangan item
+  const allRawItems = [];
+  const globalSeen = new Set();
+
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value && r.value.length > 0) {
+      for (const item of r.value) {
+        if (!globalSeen.has(item.url)) {
+          globalSeen.add(item.url);
+          allRawItems.push(item);
+        }
+      }
+    }
+  }
+
+  // Fallback: jika penggabungan kosong, coba ambil hasil terbanyak dari satu metode
+  let rawItems = allRawItems;
+  if (rawItems.length === 0) {
+    let best = null;
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value && r.value.length > 0) {
+        if (!best || r.value.length > best.length) best = r.value;
+      }
+    }
+    rawItems = best || [];
+  }
+
+  if (!rawItems || rawItems.length === 0) {
+    throw new Error("Direct API: semua 4 metode (EmbedAPI, GraphQL, HTML Scrape, oEmbed) gagal");
+  }
+
+  const unique = dedupeItems(rawItems);
+  const mediaItems = toMediaItems(unique);
+
+  // Fetch real username via embed page (works without login)
+  let realAuthor = "Instagram User";
+  let realCaption = "";
+  try {
+    const embedResp = await axios.get(
+      `https://www.instagram.com/p/${shortcode}/embed/`,
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }, timeout: 8000 }
+    );
+    const html = embedResp.data;
+    const usernameMatch = html.match(/class="Username">([^<]+)/);
+    if (usernameMatch?.[1]) realAuthor = usernameMatch[1].trim();
+    const captionMatch = html.match(/class="Caption"[^>]*>([^<]+)/);
+    if (captionMatch?.[1]) realCaption = captionMatch[1].trim();
+  } catch (e) {}
+
+  return {
+    platform: "instagram",
+    type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+    shortcode,
+    author: realAuthor,
+    caption: realCaption,
+    title: realCaption,
+    timestamp: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: null,
+    mediaItems,
+    source: "direct_api",
+    warning: null
+  };
+}
+
 // ─── Instagram Simple Fallback (Direct CDN) ──────────────────────────────────────
 
 async function scrapeInstagramSimple(url) {
@@ -1035,50 +1977,44 @@ async function scrapeInstagramSimple(url) {
         warning: null
       };
     } else {
-      // Untuk FOTO: Cari display_url dari JSON di HTML (lebih reliable)
-      let mainImage = null;
+      // Untuk FOTO / CAROUSEL: Ambil SEMUA foto dari JSON di HTML (support slide)
+      const photoUrls = [];
+      const seenUrls = new Set();
       
-      // Metode 1: Cari "display_url" dari JSON (paling reliable)
-      const displayUrlMatch = html.match(/"display_url":"([^"]+)"/);
-      if (displayUrlMatch && displayUrlMatch[1]) {
-        mainImage = displayUrlMatch[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
-        console.log(`[Scraper] Foto dari display_url: ${mainImage.substring(0, 100)}...`);
+      // Metode 1: Ambil SEMUA "display_url" dari JSON (support carousel)
+      const displayUrlRegex = /"display_url":"([^"]+)"/g;
+      let dm;
+      while ((dm = displayUrlRegex.exec(html)) !== null) {
+        const photoUrl = dm[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
+        if (photoUrl.includes('profile_pic')) continue;
+        if (photoUrl.includes('/v/t51.2885-19/')) continue;
+        if (photoUrl.includes('static.cdninstagram.com')) continue;
+        if (!seenUrls.has(photoUrl)) { seenUrls.add(photoUrl); photoUrls.push(photoUrl); }
       }
       
-      // Metode 2: Fallback ke regex jika display_url tidak ada
-      if (!mainImage) {
-        const imgRegex = /https:\/\/[^"'\s]*scontent[^"'\s]*\.jpg[^"'\s]*/gi;
+      // Metode 2: Fallback regex scontent CDN jika tidak ada display_url
+      if (photoUrls.length === 0) {
+        const imgRegex = /https:\/\/[^"'\s]*(?:scontent|cdninstagram)[^"'\s]*\.jpg[^"'\s]*/gi;
         const imgMatches = html.match(imgRegex) || [];
-        
-        console.log(`[Scraper] Ditemukan ${imgMatches.length} gambar total via regex`);
-        
-        // Filter: BUANG foto profil dan thumbnail kecil
-        const validImages = imgMatches
+        imgMatches
           .map(img => img.replace(/\\u0026/g, '&').replace(/\\/g, ''))
           .filter(img => {
-            // SKIP foto profil
             if (img.includes('profile_pic')) return false;
             if (img.includes('/v/t51.2885-19/')) return false;
-            
-            // SKIP thumbnail kecil
-            if (img.includes('150x150')) return false;
-            if (img.includes('s150x150')) return false;
-            if (img.includes('44x44')) return false;
-            if (img.includes('s320x320')) return false;
-            
+            if (img.includes('150x150') || img.includes('s150x150')) return false;
+            if (img.includes('44x44') || img.includes('s320x320')) return false;
+            if (img.includes('static.cdninstagram.com')) return false;
             return true;
           })
-          .sort((a, b) => b.length - a.length);
-        
-        console.log(`[Scraper] Setelah filter: ${validImages.length} foto valid`);
-        
-        if (validImages.length > 0) {
-          mainImage = validImages[0];
-          console.log(`[Scraper] Foto terpilih: ${mainImage.substring(0, 100)}...`);
-        }
+          .sort((a, b) => b.length - a.length)
+          .forEach(img => {
+            if (!seenUrls.has(img)) { seenUrls.add(img); photoUrls.push(img); }
+          });
       }
       
-      if (!mainImage) {
+      console.log(`[Scraper] Simple: Ditemukan ${photoUrls.length} foto (carousel support)`);
+      
+      if (photoUrls.length === 0) {
         throw new Error("Tidak ditemukan foto post di halaman Instagram");
       }
       
@@ -1089,28 +2025,26 @@ async function scrapeInstagramSimple(url) {
         username = usernameMatch[1];
       }
       
+      // Build mediaItems dari SEMUA foto (carousel support)
+      const mediaItemsImg = photoUrls.map((photoUrl, i) => ({
+        type: "image",
+        url: photoUrl,
+        thumbnail: photoUrl,
+        width: null, height: null, duration: null,
+        ext: 'jpg',
+        formats: [{ type: "image", quality: i === 0 ? "HD" : `HD Foto ${i + 1}`, url: photoUrl, ext: 'jpg' }]
+      }));
+      
       return {
         platform: "instagram",
-        type: "image",
+        type: mediaItemsImg.length > 1 ? "playlist" : "image",
         shortcode: extractShortcode(url) || "simple",
         author: username,
         caption: "",
         title: "",
         timestamp: null,
-        likeCount: 0,
-        commentCount: 0,
-        viewCount: 0,
-        duration: null,
-        mediaItems: [{
-          type: "image",
-          url: mainImage,
-          thumbnail: mainImage,
-          width: null,
-          height: null,
-          duration: null,
-          ext: 'jpg',
-          formats: [{ type: "image", quality: "Original", url: mainImage, ext: 'jpg' }]
-        }],
+        likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+        mediaItems: mediaItemsImg,
         source: "simple_scraper",
         warning: null
       };
@@ -1120,7 +2054,7 @@ async function scrapeInstagramSimple(url) {
   }
 }
 
-// ─── Playwright Instagram Fallback (Download Direct) ────────────────────────────
+// ─── Playwright Instagram Fallback (Download Direct + Carousel Support) ──────────
 
 async function scrapeInstagramViaPlaywright(url) {
   let browser;
@@ -1128,58 +2062,91 @@ async function scrapeInstagramViaPlaywright(url) {
   
   try {
     const { chromium } = require('playwright');
-    console.log("[Scraper] Mencoba Playwright untuk Instagram foto...");
+    console.log("[Scraper] Mencoba Playwright untuk Instagram (carousel-aware)...");
     
     // Launch browser
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 900 }
     });
     const page = await context.newPage();
     
-    // Cegah resource berat untuk mempercepat
+    // Block heavy resources for speed
     await page.route('**/*.{woff,woff2,ttf}', route => route.abort());
+    await page.route('**/*.mp4', route => route.abort());
 
-    // Pergi ke URL post IG
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+    // Navigate to the post
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     
-    // Tunggu sebentar untuk pastikan gambar muncul
-    await page.waitForTimeout(4000);
+    // Wait for content to render
+    await page.waitForTimeout(5000);
 
-    // Cek apakah ini reel/video atau foto
+    // Dismiss login wall if present (click "Not now" or close button)
+    try {
+      const notNowBtn = await page.$('text=Not now');
+      if (notNowBtn) await notNowBtn.click();
+      await page.waitForTimeout(1000);
+    } catch (e) {}
+    try {
+      // Try clicking outside the modal or pressing Escape
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+    } catch (e) {}
+
+    // Check if this is a reel/video
     const isReel = url.includes('/reel/') || url.includes('/reels/');
 
-    // Ambil media dan username
+    // Extract ALL carousel images by clicking through the "Next" button
     const result = await page.evaluate((isReelUrl) => {
-      // Cari video terlebih dahulu (prioritas untuk reel)
+      // Helper: check if URL is a post image (not profile pic, not tiny thumbnail)
+      function isPostImage(src) {
+        if (!src) return false;
+        if (!src.includes('fbcdn.net') && !src.includes('cdninstagram.com')) return false;
+        if (src.includes('profile_pic') || src.includes('/v/t51.2885-19/')) return false;
+        if (src.includes('s150x150') || src.includes('s320x320') || src.includes('44x44') || src.includes('s480x480')) return false;
+        if (src.includes('/v/t51.2885-15/')) return false; // logo/UI assets
+        return true;
+      }
+
+      // Collect images from carousel <li> elements or main post area
+      function collectCarouselImages() {
+        const images = [];
+        const seen = new Set();
+        
+        // Method 1: Get images from <li> elements (Instagram carousel uses <ul><li>)
+        const listItems = document.querySelectorAll('main li img, main ul li img');
+        listItems.forEach(img => {
+          const src = img.src || '';
+          if (isPostImage(src) && !seen.has(src)) {
+            seen.add(src);
+            images.push(src);
+          }
+        });
+        
+        // Method 2: If no <li> images, get from all visible post images
+        if (images.length === 0) {
+          const allImgs = Array.from(document.querySelectorAll('main img'));
+          allImgs.forEach(img => {
+            const src = img.src || '';
+            if (isPostImage(src) && !seen.has(src) && img.naturalWidth > 200) {
+              seen.add(src);
+              images.push(src);
+            }
+          });
+        }
+        
+        return images;
+      }
+
+      // Get video URLs for reels
       const videos = Array.from(document.querySelectorAll('video'));
       const videoUrls = videos
         .map(vid => vid.src || vid.querySelector('source')?.src)
-        .filter(src => src && (src.includes('scontent') || src.includes('cdninstagram')));
+        .filter(src => src && (src.includes('scontent') || src.includes('cdninstagram') || src.includes('fbcdn')));
       
-      // Cari gambar - SKIP foto profil dan thumbnail kecil saja
-      const imgs = Array.from(document.querySelectorAll('img'));
-      const images = imgs
-        .map(img => ({ src: img.src, width: img.naturalWidth || img.width || 0 }))
-        .filter(item => {
-          const src = item.src;
-          if (!src || !src.includes('scontent')) return false;
-          
-          // SKIP foto profil
-          if (src.includes('profile_pic')) return false;
-          if (src.includes('/v/t51.2885-19/')) return false;
-          
-          // SKIP thumbnail sangat kecil
-          if (src.includes('150x150')) return false;
-          if (src.includes('s150x150')) return false;
-          if (src.includes('44x44')) return false;
-          if (src.includes('s320x320')) return false;
-          if (item.width > 0 && item.width < 200) return false;
-          
-          return true;
-        })
-        .sort((a, b) => b.width - a.width)
-        .map(item => item.src);
+      // Collect carousel images
+      const carouselImages = collectCarouselImages();
       
       // Extract username
       let username = "Instagram User";
@@ -1191,82 +2158,112 @@ async function scrapeInstagramViaPlaywright(url) {
           username = titleMatch[1].replace('@', '');
         }
       }
+      // Also try from page links
+      const profileLink = document.querySelector('main a[href^="/"]');
+      if (profileLink) {
+        const href = profileLink.getAttribute('href') || '';
+        const match = href.match(/^\/([^\/]+)\/?$/);
+        if (match && match[1] && !['explore', 'reels', 'direct'].includes(match[1])) {
+          username = match[1];
+        }
+      }
+      
+      // Check if there's a "Next" button (indicates carousel)
+      const hasNextButton = !!document.querySelector('main [aria-label="Next"], main button:has-text("Next")');
       
       return { 
         video: videoUrls[0] || null,
-        image: images[0] || null,
-        username 
+        carouselImages,
+        username,
+        hasNextButton,
+        isCarousel: carouselImages.length > 1 || hasNextButton
       };
     }, isReel);
 
-    let mediaItem = null;
+    // If carousel detected, click through "Next" to load ALL images
+    if (result.hasNextButton && result.carouselImages.length <= 1) {
+      console.log("[Scraper] Carousel detected, clicking through slides...");
+      for (let i = 0; i < 15; i++) { // max 15 slides
+        try {
+          const nextBtn = await page.$('main [aria-label="Next"], main button:has-text("Next")');
+          if (!nextBtn) break;
+          await nextBtn.click();
+          await page.waitForTimeout(1500);
+        } catch (e) { break; }
+      }
+      // Re-collect images after clicking through all slides
+      const updatedImages = await page.evaluate(() => {
+        function isPostImage(src) {
+          if (!src) return false;
+          if (!src.includes('fbcdn.net') && !src.includes('cdninstagram.com')) return false;
+          if (src.includes('profile_pic') || src.includes('/v/t51.2885-19/')) return false;
+          if (src.includes('s150x150') || src.includes('s320x320') || src.includes('44x44')) return false;
+          return true;
+        }
+        const images = [];
+        const seen = new Set();
+        const allImgs = Array.from(document.querySelectorAll('main img'));
+        allImgs.forEach(img => {
+          const src = img.src || '';
+          if (isPostImage(src) && !seen.has(src) && img.naturalWidth > 200) {
+            seen.add(src);
+            images.push(src);
+          }
+        });
+        return images;
+      });
+      if (updatedImages.length > result.carouselImages.length) {
+        result.carouselImages = updatedImages;
+      }
+    }
+
+    // Build media items
+    const mediaItems = [];
     
     if (result.video && isReel) {
-      // Video/Reel: return URL langsung
-      mediaItem = {
+      // Video/Reel
+      mediaItems.push({
         type: "video",
         url: result.video,
-        thumbnail: result.image || result.video,
+        thumbnail: result.carouselImages[0] || result.video,
         width: null,
         height: null,
         duration: null,
         ext: 'mp4',
         formats: [{ type: "video", quality: "HD", url: result.video, ext: 'mp4' }]
-      };
-    } else if (result.image) {
-      // Foto: Download dan convert ke base64
-      console.log(`[Scraper] Downloading foto dari: ${result.image.substring(0, 80)}...`);
-      
-      try {
-        const imageResponse = await axios.get(result.image, {
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://www.instagram.com/',
-            'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
-          },
-          timeout: 15000
+      });
+    } else if (result.carouselImages.length > 0) {
+      // Foto / Carousel — return ALL images
+      console.log(`[Scraper] Playwright: ditemukan ${result.carouselImages.length} foto`);
+      for (let i = 0; i < result.carouselImages.length; i++) {
+        const imgUrl = result.carouselImages[i];
+        mediaItems.push({
+          type: "image",
+          url: imgUrl,
+          thumbnail: imgUrl,
+          width: null,
+          height: null,
+          duration: null,
+          ext: 'jpg',
+          formats: [{
+            type: "image",
+            quality: i === 0 ? "HD" : `HD Foto ${i + 1}`,
+            url: imgUrl,
+            ext: 'jpg'
+          }]
         });
-        
-        const imageBuffer = Buffer.from(imageResponse.data, 'binary');
-        const imageBase64 = imageBuffer.toString('base64');
-        const imageDataUrl = `data:image/jpeg;base64,${imageBase64}`;
-        
-        console.log(`[Scraper] Foto berhasil didownload: ${imageBuffer.length} bytes`);
-        
-        mediaItem = {
-          type: "image",
-          url: imageDataUrl,  // Base64 data URL
-          thumbnail: imageDataUrl,
-          width: null,
-          height: null,
-          duration: null,
-          ext: 'jpg',
-          formats: [{ type: "image", quality: "Original", url: imageDataUrl, ext: 'jpg' }]
-        };
-      } catch (dlErr) {
-        console.warn(`[Scraper] Gagal download foto: ${dlErr.message}, fallback ke URL`);
-        // Fallback: return URL original
-        mediaItem = {
-          type: "image",
-          url: result.image,
-          thumbnail: result.image,
-          width: null,
-          height: null,
-          duration: null,
-          ext: 'jpg',
-          formats: [{ type: "image", quality: "Original", url: result.image, ext: 'jpg' }]
-        };
       }
     }
 
-    if (!mediaItem) {
-      throw new Error("Media POST tidak ditemukan via Playwright");
+    if (mediaItems.length === 0) {
+      throw new Error("Media tidak ditemukan via Playwright");
     }
+
+    console.log(`[Scraper] ✅ Playwright berhasil: ${mediaItems.length} media item${mediaItems.length > 1 ? 's (carousel)' : ''}`);
 
     return {
       platform: "instagram",
-      type: mediaItem.type,
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
       shortcode: extractShortcode(url) || "playwright",
       author: result.username,
       caption: "",
@@ -1276,9 +2273,9 @@ async function scrapeInstagramViaPlaywright(url) {
       commentCount: 0,
       viewCount: 0,
       duration: null,
-      mediaItems: [mediaItem],
+      mediaItems,
       source: "playwright",
-      warning: mediaItem.url.startsWith('data:') ? "Foto dikonversi ke base64" : null
+      warning: null
     };
   } catch (err) {
     throw new Error("Playwright gagal: " + err.message);
@@ -2185,14 +3182,17 @@ async function scrapePinterest(url) {
   
   const errors = [];
   
-  // Method 1: Pinterest Internal API
-  try {
-    const result = await scrapePinterestViaPinDown(url);
-    console.log("[Pinterest] ✅ Success via Pinterest API");
-    return result;
-  } catch (err) {
-    console.warn(`[Pinterest] Pinterest API failed: ${err.message}`);
-    errors.push(`Pinterest API: ${err.message}`);
+  // Method 1: yt-dlp (paling andal untuk Pinterest, support HLS & MP4)
+  const ytdlpAvailable = await checkYtDlp();
+  if (ytdlpAvailable) {
+    try {
+      const result = await scrapePinterestViaYtDlp(url);
+      console.log("[Pinterest] ✅ Success via yt-dlp");
+      return result;
+    } catch (err) {
+      console.warn(`[Pinterest] yt-dlp failed: ${err.message}`);
+      errors.push(`yt-dlp: ${err.message}`);
+    }
   }
   
   // Method 2: Playwright (for video pins with dynamic content)
@@ -2205,7 +3205,17 @@ async function scrapePinterest(url) {
     errors.push(`Playwright: ${err.message}`);
   }
   
-  // Method 3: Direct Scraping
+  // Method 3: Pinterest Internal API
+  try {
+    const result = await scrapePinterestViaPinDown(url);
+    console.log("[Pinterest] ✅ Success via Pinterest API");
+    return result;
+  } catch (err) {
+    console.warn(`[Pinterest] Pinterest API failed: ${err.message}`);
+    errors.push(`Pinterest API: ${err.message}`);
+  }
+  
+  // Method 4: Direct Scraping
   try {
     const result = await scrapePinterestDirect(url);
     console.log("[Pinterest] ✅ Success via Direct Scraping");
@@ -2215,7 +3225,7 @@ async function scrapePinterest(url) {
     errors.push(`Direct: ${err.message}`);
   }
   
-  // Method 4: Pindl API
+  // Method 5: Pindl API
   try {
     const result = await scrapePinterestViaPindl(url);
     console.log("[Pinterest] ✅ Success via Pindl API");
@@ -2223,19 +3233,6 @@ async function scrapePinterest(url) {
   } catch (err) {
     console.warn(`[Pinterest] Pindl failed: ${err.message}`);
     errors.push(`Pindl: ${err.message}`);
-  }
-  
-  // Method 5: yt-dlp (last resort)
-  const ytdlpAvailable = await checkYtDlp();
-  if (ytdlpAvailable) {
-    try {
-      const result = await scrapePinterestViaYtDlp(url);
-      console.log("[Pinterest] ✅ Success via yt-dlp");
-      return result;
-    } catch (err) {
-      console.warn(`[Pinterest] yt-dlp failed: ${err.message}`);
-      errors.push(`yt-dlp: ${err.message}`);
-    }
   }
   
   // All methods failed
@@ -2249,14 +3246,15 @@ async function scrapePinterestViaYtDlp(url) {
   console.log("[Pinterest] Trying yt-dlp...");
   
   return new Promise((resolve, reject) => {
-    const args = [
+    // First, get video info
+    const infoArgs = [
       "--dump-json",
       "--no-warnings",
       "--no-playlist",
       url
     ];
     
-    execFile("yt-dlp", args, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile("yt-dlp", infoArgs, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error || stderr) {
         return reject(new Error(`yt-dlp error: ${stderr || error.message}`));
       }
@@ -2266,9 +3264,122 @@ async function scrapePinterestViaYtDlp(url) {
         const pinId = url.match(/\/pin\/(\d+)/)?.[1] || info.id || "unknown";
         const mediaItems = [];
         
-        if (info.url && info.url.length > 10) {
-          const isVideo = info.url.includes('.mp4') || info.ext === 'mp4';
+        // Check if this is a video with HLS streams (Pinterest typically uses HLS)
+        const hasHLS = info.formats && info.formats.some(f => f.url && f.url.includes('.m3u8'));
+        const isVideo = info.ext === 'mp4' || hasHLS || (info.formats && info.formats.length > 0);
+        
+        if (isVideo && hasHLS) {
+          // For HLS videos, download directly using yt-dlp
+          const tempDir = require('path').join(__dirname, 'temp_downloads');
+          const fs = require('fs');
           
+          // Ensure temp directory exists
+          if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+          }
+          
+          const filename = `pinterest_${pinId}_${Date.now()}.mp4`;
+          const outputPath = require('path').join(tempDir, filename);
+          
+          // Download video using yt-dlp
+          const dlArgs = [
+            "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--no-warnings",
+            "--no-playlist",
+            "-o", outputPath,
+            url
+          ];
+          
+          console.log(`[Pinterest] Downloading video to ${filename}...`);
+          
+          execFile("yt-dlp", dlArgs, { maxBuffer: 50 * 1024 * 1024, timeout: 120000 }, (dlError, dlStdout, dlStderr) => {
+            if (dlError) {
+              console.warn(`[Pinterest] yt-dlp download failed: ${dlError.message}`);
+              // Fallback to returning HLS URL
+              const bestFormat = info.formats.filter(f => f.url && f.vcodec && f.vcodec !== 'none')
+                .sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+              
+              if (bestFormat) {
+                mediaItems.push({
+                  type: "video",
+                  url: bestFormat.url,
+                  thumbnail: info.thumbnail || null,
+                  width: bestFormat.width || null,
+                  height: bestFormat.height || null,
+                  duration: info.duration || null,
+                  ext: 'mp4',
+                  formats: [{
+                    type: "video",
+                    quality: `${bestFormat.height}p`,
+                    url: bestFormat.url,
+                    ext: 'mp4'
+                  }]
+                });
+              }
+              
+              if (mediaItems.length === 0) {
+                return reject(new Error("No valid media found"));
+              }
+              
+              return resolve({
+                platform: "pinterest",
+                type: "video",
+                shortcode: pinId,
+                author: info.uploader || "Pinterest User",
+                caption: info.description || "",
+                title: info.title || "",
+                timestamp: info.timestamp || null,
+                likeCount: 0,
+                commentCount: 0,
+                viewCount: 0,
+                duration: info.duration || null,
+                mediaItems: mediaItems,
+                source: "yt-dlp",
+                warning: "HLS stream - may need client-side playback"
+              });
+            }
+            
+            // Download successful - return local URL
+            const localUrl = `/temp/${filename}`;
+            console.log(`[Pinterest] ✅ Video downloaded: ${filename}`);
+            
+            mediaItems.push({
+              type: "video",
+              url: localUrl,
+              thumbnail: info.thumbnail || null,
+              width: info.width || null,
+              height: info.height || null,
+              duration: info.duration || null,
+              ext: 'mp4',
+              formats: [{
+                type: "video",
+                quality: `${info.height || 720}p`,
+                url: localUrl,
+                ext: 'mp4'
+              }]
+            });
+            
+            resolve({
+              platform: "pinterest",
+              type: "video",
+              shortcode: pinId,
+              author: info.uploader || "Pinterest User",
+              caption: info.description || "",
+              title: info.title || "",
+              timestamp: info.timestamp || null,
+              likeCount: 0,
+              commentCount: 0,
+              viewCount: 0,
+              duration: info.duration || null,
+              mediaItems: mediaItems,
+              source: "yt-dlp",
+              warning: null
+            });
+          });
+          
+        } else if (info.url && info.url.length > 10) {
+          // Direct URL available (rare for Pinterest)
           mediaItems.push({
             type: isVideo ? "video" : "image",
             url: info.url,
@@ -2284,6 +3395,24 @@ async function scrapePinterestViaYtDlp(url) {
               ext: isVideo ? 'mp4' : 'jpg'
             }]
           });
+          
+          resolve({
+            platform: "pinterest",
+            type: mediaItems[0].type,
+            shortcode: pinId,
+            author: info.uploader || "Pinterest User",
+            caption: info.description || "",
+            title: info.title || "",
+            timestamp: info.timestamp || null,
+            likeCount: 0,
+            commentCount: 0,
+            viewCount: 0,
+            duration: info.duration || null,
+            mediaItems: mediaItems,
+            source: "yt-dlp",
+            warning: null
+          });
+          
         } else if (info.formats && info.formats.length > 0) {
           const videoFormats = info.formats.filter(f => f.url && f.vcodec && f.vcodec !== 'none');
           
@@ -2307,6 +3436,28 @@ async function scrapePinterestViaYtDlp(url) {
               }]
             });
           }
+          
+          if (mediaItems.length === 0) {
+            return reject(new Error("No valid media found"));
+          }
+          
+          resolve({
+            platform: "pinterest",
+            type: mediaItems[0].type,
+            shortcode: pinId,
+            author: info.uploader || "Pinterest User",
+            caption: info.description || "",
+            title: info.title || "",
+            timestamp: info.timestamp || null,
+            likeCount: 0,
+            commentCount: 0,
+            viewCount: 0,
+            duration: info.duration || null,
+            mediaItems: mediaItems,
+            source: "yt-dlp",
+            warning: null
+          });
+          
         } else if (info.thumbnail) {
           mediaItems.push({
             type: "image",
@@ -2323,28 +3474,27 @@ async function scrapePinterestViaYtDlp(url) {
               ext: 'jpg'
             }]
           });
-        }
-        
-        if (mediaItems.length === 0) {
+          
+          resolve({
+            platform: "pinterest",
+            type: mediaItems[0].type,
+            shortcode: pinId,
+            author: info.uploader || "Pinterest User",
+            caption: info.description || "",
+            title: info.title || "",
+            timestamp: info.timestamp || null,
+            likeCount: 0,
+            commentCount: 0,
+            viewCount: 0,
+            duration: null,
+            mediaItems: mediaItems,
+            source: "yt-dlp",
+            warning: null
+          });
+          
+        } else {
           return reject(new Error("No valid media found"));
         }
-        
-        resolve({
-          platform: "pinterest",
-          type: mediaItems[0].type,
-          shortcode: pinId,
-          author: info.uploader || "Pinterest User",
-          caption: info.description || "",
-          title: info.title || "",
-          timestamp: info.timestamp || null,
-          likeCount: 0,
-          commentCount: 0,
-          viewCount: 0,
-          duration: info.duration || null,
-          mediaItems: mediaItems,
-          source: "yt-dlp",
-          warning: null
-        });
       } catch (parseErr) {
         reject(new Error(`Parse error: ${parseErr.message}`));
       }
@@ -2456,6 +3606,99 @@ async function scrapeYouTubeViaYtdlCore(url) {
 
   console.log(`[YouTube] ✅ @distube/ytdl-core berhasil: ${formats.length} format, title="${title}"`);
   return buildYouTubeResult(videoId, formats[0].url, title, thumbnail, formats[0].quality, "ytdl-core", formats, author, duration);
+}
+
+/**
+ * YouTube via yt-dlp dengan opsi khusus untuk bypass bot detection.
+ * Lebih agresif daripada scrapeViaYtDlp standar — khusus YouTube.
+ */
+async function scrapeYouTubeViaYtDlpDirect(url) {
+  console.log("[YouTube] Mencoba yt-dlp (mode YouTube direct)...");
+
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
+
+  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Opsi yt-dlp khusus YouTube: format terbaik yang bisa langsung diplay
+  const args = [
+    "--dump-single-json",
+    "--no-warnings",
+    "--no-playlist",
+    "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
+    "--merge-output-format", "mp4",
+    "--extractor-args", "youtube:player_client=android,web",
+    "--no-check-certificates",
+    cleanUrl
+  ];
+
+  const raw = await runCommand("yt-dlp", args, 90000);
+  const info = JSON.parse(raw);
+
+  const title = info.title || "YouTube Video";
+  const author = info.uploader || info.channel || "YouTube";
+  const thumbnail = info.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  const duration = info.duration || null;
+
+  // Kumpulkan format dari yt-dlp
+  const formats = [];
+  const seenQ = new Set();
+  if (info.formats && Array.isArray(info.formats)) {
+    const mp4Formats = info.formats.filter(f =>
+      f.url && (f.ext === "mp4" || f.vcodec !== "none") && f.vcodec !== "none"
+    ).sort((a, b) => (b.height || 0) - (a.height || 0));
+
+    for (const f of mp4Formats) {
+      const q = f.height ? `${f.height}p` : (f.format_note || "SD");
+      if (!seenQ.has(q)) {
+        seenQ.add(q);
+        formats.push({ type: "video", quality: q, url: f.url, ext: "mp4" });
+      }
+    }
+  }
+
+  // Fallback ke URL utama jika tidak ada format
+  const mainUrl = info.url || (formats[0] && formats[0].url);
+  if (!mainUrl) throw new Error("yt-dlp tidak menghasilkan URL yang valid");
+
+  if (formats.length === 0) {
+    formats.push({ type: "video", quality: "Best", url: mainUrl, ext: "mp4" });
+  }
+
+  console.log(`[YouTube] ✅ yt-dlp direct berhasil: ${formats.length} format`);
+  return buildYouTubeResult(videoId, formats[0].url, title, thumbnail, formats[0].quality, "ytdlp-direct", formats, author, duration);
+}
+
+/**
+ * YouTube via API publik ytsearch / noembed — hanya metadata + link langsung YouTube.
+ * Dipakai sebagai fallback terakhir: mengembalikan link YouTube langsung agar user bisa download manual.
+ */
+async function scrapeYouTubeViaNoEmbed(url) {
+  console.log("[YouTube] Mencoba NoEmbed/oEmbed untuk metadata...");
+
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
+
+  const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`;
+  const resp = await axios.get(oembedUrl, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    timeout: 10000
+  });
+
+  const data = resp.data;
+  if (!data || !data.title) throw new Error("NoEmbed: tidak ada data");
+
+  const title = data.title || "YouTube Video";
+  const author = data.author_name || "YouTube";
+  const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+  // Kembalikan URL YouTube langsung — browser/IDM bisa handle ini
+  const directUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  console.log(`[YouTube] ✅ NoEmbed berhasil: title="${title}"`);
+  return buildYouTubeResult(videoId, directUrl, title, thumbnail, "YouTube Link", "noembed", [
+    { type: "video", quality: "Buka di YouTube", url: directUrl, ext: "mp4" }
+  ], author, null);
 }
 
 /**
@@ -2606,6 +3849,9 @@ async function scrapeYouTubeViaInvidious(url) {
     "https://iv.datura.network",
     "https://invidious.perennialte.ch",
     "https://invidious.nerdvpn.de",
+    "https://invidious.reallyaweso.me",
+    "https://invidious.no-logs.com",
+    "https://vid.puffyan.us",
   ];
 
   for (const instance of instances) {
@@ -2690,6 +3936,8 @@ async function scrapeYouTubeViaPiped(url) {
     "https://pipedapi.adminforge.de",
     "https://pipedapi.drgns.space",
     "https://piped-api.garudalinux.org",
+    "https://piped.video/api",
+    "https://pipedapi.tokhmi.xyz",
   ];
 
   for (const instance of pipedInstances) {
@@ -2782,38 +4030,62 @@ function buildYouTubeResult(videoId, url, title, thumbnail, quality, source, for
 }
 
 /**
- * YouTube via Cobalt API (open-source, tidak butuh API key).
+ * YouTube via Cobalt API v10 (open-source, tidak butuh API key).
  * Cobalt adalah tool download media open-source yang mendukung YouTube.
+ * API v10: POST /api dengan Accept: application/json (bukan /api/json lagi)
  */
 async function scrapeYouTubeViaCobalt(url) {
-  console.log("[YouTube] Mencoba Cobalt API...");
+  console.log("[YouTube] Mencoba Cobalt API v10...");
 
-  // Daftar instansi Cobalt publik yang bisa dipakai
+  // Daftar instansi Cobalt publik — format API v10
   const cobaltInstances = [
     "https://cobalt.api.lrclib.net",
-    "https://co.wuk.sh",
     "https://cobalt-api.oofe.org",
+    "https://co.wuk.sh",
+    "https://cobalt.tools",
   ];
 
   for (const instance of cobaltInstances) {
     try {
-      const response = await axios.post(
-        `${instance}/api/json`,
-        {
-          url: url,
-          vQuality: "720",
-          filenamePattern: "basic",
-          isAudioOnly: false,
-          disableMetadata: true,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
+      // Coba API v10 dulu (endpoint /api)
+      let response;
+      try {
+        response = await axios.post(
+          `${instance}/api`,
+          {
+            url: url,
+            videoQuality: "720",
+            filenameStyle: "basic",
+            downloadMode: "auto",
           },
-          timeout: 20000,
-        }
-      );
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            timeout: 20000,
+          }
+        );
+      } catch (v10Err) {
+        // Fallback ke endpoint lama /api/json jika v10 tidak tersedia
+        response = await axios.post(
+          `${instance}/api/json`,
+          {
+            url: url,
+            vQuality: "720",
+            filenamePattern: "basic",
+            isAudioOnly: false,
+            disableMetadata: true,
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            timeout: 20000,
+          }
+        );
+      }
 
       const data = response.data;
 
@@ -3348,7 +4620,26 @@ async function getYouTubeMetadata(url) {
 async function scrapeYouTube(url, ytdlpAvailable = false) {
   const errors = [];
 
-  // Method 1: yt-dlp (jika tersedia dan tidak kena bot detection)
+  // Method 1: yt-dlp mode YouTube Direct (opsi khusus YouTube, bypass bot detection)
+  // Ini paling andal — gunakan android + web player client untuk hindari "Sign in to confirm"
+  if (ytdlpAvailable) {
+    try {
+      const result = await scrapeYouTubeViaYtDlpDirect(url);
+      const hasValidMedia = result.mediaItems.some(
+        (item) => item.url && item.url.length > 10
+      );
+      if (hasValidMedia) {
+        console.log("[YouTube] ✅ Berhasil via yt-dlp direct");
+        return result;
+      }
+      throw new Error("yt-dlp mengembalikan URL media kosong");
+    } catch (err) {
+      console.warn(`[YouTube] yt-dlp direct gagal: ${err.message.substring(0, 120)}`);
+      errors.push(`yt-dlp-direct: ${err.message.substring(0, 80)}`);
+    }
+  }
+
+  // Method 2: yt-dlp standar (tanpa opsi khusus) — fallback jika mode direct gagal
   if (ytdlpAvailable) {
     try {
       const result = await scrapeViaYtDlp(url, "youtube");
@@ -3356,57 +4647,17 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
         (item) => item.url && item.url.length > 10
       );
       if (hasValidMedia) {
-        console.log("[YouTube] ✅ Berhasil via yt-dlp");
+        console.log("[YouTube] ✅ Berhasil via yt-dlp standar");
         return result;
       }
       throw new Error("yt-dlp mengembalikan URL media kosong");
     } catch (err) {
-      console.warn(`[YouTube] yt-dlp gagal: ${err.message.substring(0, 120)}`);
+      console.warn(`[YouTube] yt-dlp standar gagal: ${err.message.substring(0, 120)}`);
       errors.push(`yt-dlp: ${err.message.substring(0, 80)}`);
     }
   }
 
-  // Method 2: @distube/ytdl-core — pure Node.js, langsung ke YouTube, paling reliable di Railway
-  try {
-    const result = await scrapeYouTubeViaYtdlCore(url);
-    console.log("[YouTube] ✅ Berhasil via @distube/ytdl-core");
-    return result;
-  } catch (err) {
-    console.warn(`[YouTube] @distube/ytdl-core gagal: ${err.message}`);
-    errors.push(`ytdl-core: ${err.message}`);
-  }
-
-  // Method 3: Invidious — YouTube proxy open-source, accessible dari datacenter
-  try {
-    const result = await scrapeYouTubeViaInvidious(url);
-    console.log("[YouTube] ✅ Berhasil via Invidious");
-    return result;
-  } catch (err) {
-    console.warn(`[YouTube] Invidious gagal: ${err.message}`);
-    errors.push(`Invidious: ${err.message}`);
-  }
-
-  // Method 4: Piped — alternatif YouTube proxy, accessible dari datacenter
-  try {
-    const result = await scrapeYouTubeViaPiped(url);
-    console.log("[YouTube] ✅ Berhasil via Piped");
-    return result;
-  } catch (err) {
-    console.warn(`[YouTube] Piped gagal: ${err.message}`);
-    errors.push(`Piped: ${err.message}`);
-  }
-
-  // Method 4: RapidAPI — API komersial, bisa diakses dari Railway
-  try {
-    const result = await scrapeYouTubeViaRapidAPI(url);
-    console.log("[YouTube] ✅ Berhasil via RapidAPI");
-    return result;
-  } catch (err) {
-    console.warn(`[YouTube] RapidAPI gagal: ${err.message}`);
-    errors.push(`RapidAPI: ${err.message}`);
-  }
-
-  // Method 5: Cobalt API (mungkin beberapa instance bisa diakses)
+  // Method 3: Cobalt API v10 (open-source, public instances, tidak butuh key)
   try {
     const result = await scrapeYouTubeViaCobalt(url);
     console.log("[YouTube] ✅ Berhasil via Cobalt");
@@ -3416,7 +4667,37 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     errors.push(`Cobalt: ${err.message}`);
   }
 
-  // Method 6: Siputzx
+  // Method 4: Invidious — YouTube proxy open-source
+  try {
+    const result = await scrapeYouTubeViaInvidious(url);
+    console.log("[YouTube] ✅ Berhasil via Invidious");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] Invidious gagal: ${err.message}`);
+    errors.push(`Invidious: ${err.message}`);
+  }
+
+  // Method 5: Piped — alternatif YouTube proxy
+  try {
+    const result = await scrapeYouTubeViaPiped(url);
+    console.log("[YouTube] ✅ Berhasil via Piped");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] Piped gagal: ${err.message}`);
+    errors.push(`Piped: ${err.message}`);
+  }
+
+  // Method 6: @distube/ytdl-core — pure Node.js (sering kena bot-check tapi dicoba)
+  try {
+    const result = await scrapeYouTubeViaYtdlCore(url);
+    console.log("[YouTube] ✅ Berhasil via @distube/ytdl-core");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] @distube/ytdl-core gagal: ${err.message}`);
+    errors.push(`ytdl-core: ${err.message}`);
+  }
+
+  // Method 7: Siputzx API
   try {
     const result = await scrapeYouTubeViaSiputzx(url);
     console.log("[YouTube] ✅ Berhasil via Siputzx");
@@ -3426,7 +4707,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     errors.push(`Siputzx: ${err.message}`);
   }
 
-  // Method 7: Y2Mate
+  // Method 8: Y2Mate
   try {
     const result = await scrapeYouTubeViaY2Mate(url);
     console.log("[YouTube] ✅ Berhasil via Y2Mate");
@@ -3436,7 +4717,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     errors.push(`Y2Mate: ${err.message}`);
   }
 
-  // Method 8: SaveFrom
+  // Method 9: SaveFrom
   try {
     const result = await scrapeYouTubeViaSavefrom(url);
     console.log("[YouTube] ✅ Berhasil via SaveFrom");
@@ -3446,7 +4727,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     errors.push(`SaveFrom: ${err.message}`);
   }
 
-  // Method 9: SSYouTube
+  // Method 10: SSYouTube
   try {
     const result = await scrapeYouTubeViaSSYT(url);
     console.log("[YouTube] ✅ Berhasil via SSYouTube");
@@ -3454,6 +4735,26 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
   } catch (err) {
     console.warn(`[YouTube] SSYouTube gagal: ${err.message}`);
     errors.push(`SSYouTube: ${err.message}`);
+  }
+
+  // Method 11: RapidAPI
+  try {
+    const result = await scrapeYouTubeViaRapidAPI(url);
+    console.log("[YouTube] ✅ Berhasil via RapidAPI");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] RapidAPI gagal: ${err.message}`);
+    errors.push(`RapidAPI: ${err.message}`);
+  }
+
+  // Method 12: NoEmbed — last resort, kembalikan link YouTube langsung
+  try {
+    const result = await scrapeYouTubeViaNoEmbed(url);
+    console.log("[YouTube] ✅ Berhasil via NoEmbed (metadata only)");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] NoEmbed gagal: ${err.message}`);
+    errors.push(`NoEmbed: ${err.message}`);
   }
 
   // Semua gagal
@@ -3650,79 +4951,200 @@ async function scrapeMedia(url) {
     }
   }
 
-  // Instagram: Strategi berbeda untuk foto vs video
+  // ─── INSTAGRAM ── Railway-safe strategy (no browser, no cookies-from-browser) ──
   if (platform === "instagram") {
     const isReel = url.includes('/reel/') || url.includes('/reels/');
-    
-    if (isReel) {
-      // REEL/VIDEO: Prioritaskan yt-dlp (paling reliable)
-      const ytdlpAvailable = await checkYtDlp();
-      if (ytdlpAvailable) {
-        try {
-          const result = await scrapeViaYtDlp(url, platform);
-          console.log(`[Scraper] Reel berhasil via yt-dlp (${result.mediaItems.length} item)`);
-          return result;
-        } catch (err) {
-          console.warn(`[Scraper] yt-dlp gagal untuk reel: ${err.message}`);
-        }
-      }
-    } else {
-      // FOTO: Strategi prioritas untuk foto
-      
-      // 1. PRIORITAS TERTINGGI: @mrnima/instagram-downloader
-      try {
-        const mrnimaResult = await scrapeInstagramViaMrnima(url);
-        console.log(`[Scraper] Foto berhasil via @mrnima/instagram-downloader`);
-        return mrnimaResult;
-      } catch (mrnimaErr) {
-        console.warn(`[Scraper] @mrnima/instagram-downloader gagal: ${mrnimaErr.message}`);
-      }
-      
-      // 2. Fallback: Instagram Embed endpoint
-      try {
-        const embedResult = await scrapeInstagramViaEmbed(url);
-        console.log(`[Scraper] Foto berhasil via Instagram Embed`);
-        return embedResult;
-      } catch (embedErr) {
-        console.warn(`[Scraper] Instagram Embed gagal: ${embedErr.message}`);
-      }
-    }
-    
-    // Fallback untuk semua: yt-dlp dengan cookies
     const ytdlpAvailable = await checkYtDlp();
-    if (ytdlpAvailable) {
+
+    // Helper: coba yt-dlp tanpa cookies (Railway punya yt-dlp dari Dockerfile)
+    async function tryYtDlpDirect() {
+      if (!ytdlpAvailable) throw new Error("yt-dlp tidak tersedia");
+      const raw = await runCommand("yt-dlp", [
+        "--dump-single-json", "--no-warnings", "--no-playlist",
+        "--extractor-args", "instagram:direct_video_url=true",
+        url
+      ], 60000);
+      const info = JSON.parse(raw);
+      return parseYtDlpOutput(info, "instagram");
+    }
+
+    if (isReel) {
+      // ── REEL/VIDEO ──
+      // 1. yt-dlp langsung (paling andal di Railway, sudah di-install via Dockerfile)
       try {
-        const result = await scrapeViaCookiesRetry(url, platform);
-        console.log(`[Scraper] Instagram berhasil via yt-dlp + cookies`);
-        return result;
-      } catch (cookieErr) {
-        console.warn(`[Scraper] yt-dlp + cookies gagal: ${cookieErr.message}`);
+        const r = await tryYtDlpDirect();
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Reel OK via yt-dlp (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] yt-dlp reel gagal:", e.message.substring(0, 100)); }
+
+      // 2. SSSSave
+      try {
+        const r = await scrapeInstagramViaSSSSave(url);
+        if (r.mediaItems.length > 0) { console.log("[Scraper] Reel OK via SSSSave"); return r; }
+      } catch (e) { console.warn("[Scraper] SSSSave reel gagal:", e.message.substring(0, 80)); }
+
+      // 3. igram.world
+      try {
+        const r = await scrapeInstagramViaIgram(url);
+        if (r.mediaItems.length > 0) { console.log("[Scraper] Reel OK via igram"); return r; }
+      } catch (e) { console.warn("[Scraper] igram reel gagal:", e.message.substring(0, 80)); }
+
+      // 4. SnapInsta
+      try {
+        const r = await scrapeInstagramViaSnapinsta(url);
+        if (r.mediaItems.length > 0) { console.log("[Scraper] Reel OK via SnapInsta"); return r; }
+      } catch (e) { console.warn("[Scraper] SnapInsta reel gagal:", e.message.substring(0, 80)); }
+
+    } else {
+      // ── FOTO / CAROUSEL SLIDE ──
+      // Strategi: RapidAPI (paling andal) → Direct API → API publik stabil → yt-dlp → embed fallback
+
+      // 1. [PRIORITAS UTAMA] RapidAPI — paling stabil, support carousel, username real, thumbnail lengkap
+      let firstResult = null;
+      try {
+        const r = await scrapeViaRapidAPI(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via RapidAPI (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] RapidAPI gagal:", e.message.substring(0, 120)); }
+
+      // 2. Direct API: EmbedAPI + GraphQL + HTML Scrape + oEmbed (paralel)
+      try {
+        const r = await scrapeInstagramViaDirectAPI(url);
+        if (r.mediaItems.length > 0) {
+          // Jika hanya 1 item, simpan tapi lanjutkan coba metode lain (mungkin carousel)
+          if (r.mediaItems.length === 1) {
+            firstResult = r;
+            console.log(`[Scraper] Direct API: 1 item (akan cek carousel via metode lain)`);
+          } else {
+            console.log(`[Scraper] Foto OK via Direct API (${r.mediaItems.length} item)`);
+            return r;
+          }
+        }
+      } catch (e) { console.warn("[Scraper] Direct API gagal:", e.message.substring(0, 120)); }
+
+      // 3. SSSSave — stabil, tidak butuh auth, support carousel
+      try {
+        const r = await scrapeInstagramViaSSSSave(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via SSSSave (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] SSSSave gagal:", e.message.substring(0, 80)); }
+
+      // 4. igram.world — support carousel JSON response
+      try {
+        const r = await scrapeInstagramViaIgram(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via igram (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] igram gagal:", e.message.substring(0, 80)); }
+
+      // 5. SnapInsta
+      try {
+        const r = await scrapeInstagramViaSnapinsta(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via SnapInsta (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] SnapInsta gagal:", e.message.substring(0, 80)); }
+
+      // 6. SaveIG
+      try {
+        const r = await scrapeInstagramViaSaveIG(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via SaveIG (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] SaveIG gagal:", e.message.substring(0, 80)); }
+
+      // 6b. SnapInst — carousel JSON API
+      try {
+        const r = await scrapeInstagramViaSnapInst(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via SnapInst (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] SnapInst gagal:", e.message.substring(0, 80)); }
+
+      // 7. yt-dlp foto (bisa handle foto tunggal & carousel via --dump-single-json)
+      try {
+        const r = await tryYtDlpDirect();
+        if (r.mediaItems.length > 0) {
+          if (r.mediaItems.length === 1 && !firstResult) {
+            firstResult = r;
+            console.log(`[Scraper] yt-dlp: 1 item (akan cek carousel via Playwright)`);
+          } else if (r.mediaItems.length > 1) {
+            console.log(`[Scraper] Foto OK via yt-dlp (${r.mediaItems.length} item)`);
+            return r;
+          }
+        }
+      } catch (e) { console.warn("[Scraper] yt-dlp foto gagal:", e.message.substring(0, 100)); }
+
+      // 8. @bochilteam
+      try {
+        const r = await scrapeInstagramViaBochil(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via @bochilteam (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] @bochilteam gagal:", e.message.substring(0, 80)); }
+
+      // 9. Instagram Embed (carousel-aware)
+      try {
+        const r = await scrapeInstagramViaEmbed(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via Embed (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] Embed gagal:", e.message.substring(0, 80)); }
+
+      // 10. Simple HTML scraper (carousel-aware, Railway-safe)
+      try {
+        const r = await scrapeInstagramSimple(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Foto OK via Simple (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] Simple gagal:", e.message.substring(0, 80)); }
+
+      // 11. Instaloader Python (ada di Dockerfile, Railway support)
+      try {
+        const r = await scrapeInstagramViaInstaloader(url);
+        console.log("[Scraper] Foto OK via Instaloader");
+        return r;
+      } catch (e) { console.warn("[Scraper] Instaloader gagal:", e.message.substring(0, 80)); }
+
+      // 12. Playwright (carousel-aware, fallback when semua API gagal)
+      try {
+        const r = await scrapeInstagramViaPlaywright(url);
+        if (r.mediaItems.length > 0) {
+          // Jika Playwright menemukan lebih banyak item dari firstResult (carousel!)
+          if (firstResult && r.mediaItems.length > firstResult.mediaItems.length) {
+            console.log(`[Scraper] ✅ Carousel ditemukan via Playwright (${r.mediaItems.length} item, sebelumnya ${firstResult.mediaItems.length})`);
+            return r;
+          }
+          if (!firstResult) {
+            console.log(`[Scraper] Foto OK via Playwright (${r.mediaItems.length} item)`);
+            return r;
+          }
+          // Playwright punya same/lower count, gunakan firstResult
+          console.log(`[Scraper] Playwright: ${r.mediaItems.length} item (tidak lebih dari Direct API)`);
+        }
+      } catch (e) { console.warn("[Scraper] Playwright gagal:", e.message.substring(0, 120)); }
+
+      // Fallback: jika firstResult ada (1 item dari Direct API), gunakan itu
+      if (firstResult) {
+        console.log(`[Scraper] Menggunakan hasil Direct API (1 item - bukan carousel atau carousel tidak bisa diakses)`);
+        return firstResult;
       }
     }
     
-    // Try Simple Scraper & Playwright
-    try {
-      const simpleResult = await scrapeInstagramSimple(url);
-      console.log(`[Scraper] Berhasil via Simple Scraper`);
-      return simpleResult;
-    } catch (err) {
-      try {
-        const playwrightResult = await scrapeInstagramViaPlaywright(url);
-        console.log(`[Scraper] Berhasil via Playwright`);
-        return playwrightResult;
-      } catch (pwErr) {
-        console.warn(`[Scraper] Playwright gagal: ${pwErr.message}`);
-      }
-    }
-    
-    // Last resort: Instaloader (Python)
-    try {
-      const instaloaderResult = await scrapeInstagramViaInstaloader(url);
-      console.log(`[Scraper] Berhasil via Instaloader (Python)`);
-      return instaloaderResult;
-    } catch (instaloaderErr) {
-      console.warn(`[Scraper] Instaloader gagal: ${instaloaderErr.message}`);
-    }
+    // cookies-from-browser DILEWATI di Railway (tidak ada browser)
   }
 
   // Prioritaskan @tobyg74/tiktok-api-dl untuk TikTok agar foto slide & story ditangani dengan baik

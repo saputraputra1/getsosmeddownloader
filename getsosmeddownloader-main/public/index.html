@@ -2560,8 +2560,10 @@
       const m = document.getElementById('previewModal');
       const b = document.getElementById('prevBody');
       const t = document.getElementById('prevTitle');
-      // Jika base64 data: URL, gunakan langsung tanpa proxy
-      const src = (url && url.startsWith('data:')) ? url : `${API}/api/proxy?url=${encodeURIComponent(url)}&inline=true`;
+      // Jika base64 data: URL atau local URL, gunakan langsung tanpa proxy
+      const src = (url && (url.startsWith('data:') || url.startsWith('http://localhost') || url.startsWith('/temp')))
+        ? url
+        : `${API}/api/proxy?url=${encodeURIComponent(url)}&inline=true`;
       b.innerHTML = type === 'video'
         ? `<video src="${src}" controls autoplay playsinline preload="auto" style="width:100%"></video>`
         : `<img src="${src}" alt="Preview" />`;
@@ -2861,8 +2863,8 @@
 
       data.mediaItems.forEach(item => {
         const thu = item.thumbnail || item.url;
-        // Jika base64 data: URL (dari Playwright/Instaloader), gunakan langsung tanpa proxy
-        const proxy = (thu && thu.startsWith('data:'))
+        // Jika base64 data: URL atau local URL, gunakan langsung tanpa proxy
+        const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp')))
           ? thu
           : `${API}/api/proxy?url=${encodeURIComponent(thu)}&inline=true`;
         const prevTitle = esc(data.title || a || 'Media');
@@ -2988,7 +2990,9 @@
         return;
       }
 
-      const proxy = `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
+        ? url  // Local URLs (from yt-dlp) - download directly
+        : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       const ld = document.getElementById('statusLoad');
       const lt = document.getElementById('loadText');
@@ -3037,7 +3041,9 @@
         return;
       }
 
-      const proxy = `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
+        ? url  // Local URLs (from yt-dlp) - download directly
+        : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       if (!btn) { const a = document.createElement('a'); a.href = proxy; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); return; }
 
@@ -3255,7 +3261,9 @@
       let t = encT ? decodeURIComponent(encT) : '';
       let safe = t.replace(/[^a-zA-Z0-9_\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 50) || Date.now();
       const fn = `mediaget_${safe}.${ext}`;
-      const proxy = `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
+        ? url  // Local URLs (from yt-dlp) - download directly
+        : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       alert("Pastikan aplikasi Google Drive terinstal. Setelah mendownload file, klik tombol 'Bagikan' (Share) dan pilih ikon Google Drive.");
       window.location.href = proxy;
@@ -3400,7 +3408,9 @@
     let qrObj = null;
     function showQr(url, plat, ext, encT) {
       const fn = `${plat || 'media'}_${Date.now()}.${ext || 'bin'}`;
-      const proxy = `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
+        ? url  // Local URLs (from yt-dlp) - download directly
+        : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
       document.getElementById('qrcode').innerHTML = '';
       qrObj = new QRCode(document.getElementById('qrcode'), {
         text: proxy,
@@ -3444,7 +3454,9 @@
               u = vf.url; e = vf.ext;
             }
             const fn = `${d.platform || 'media'}_${count + 1}_${Date.now()}.${e}`;
-            const proxy = `${API}/api/proxy?url=${encodeURIComponent(u)}`;
+            const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp'))
+              ? u
+              : `${API}/api/proxy?url=${encodeURIComponent(u)}`;
             tasks.push({ url: proxy, filename: fn });
             count++;
           });
