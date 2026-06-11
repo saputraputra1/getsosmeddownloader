@@ -9,6 +9,7 @@ const cors = require("cors");
 const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { scrapeMedia, scrapeTikTokStoriesByUsername, detectPlatform, isInstagramStoryUrl, checkYtDlp, PLATFORMS } = require("./scraper");
 
 // Ensure temp_downloads directory exists (for yt-dlp downloaded files)
@@ -60,6 +61,8 @@ function isAllowedCdnUrl(urlString) {
       /^fbvideo[\w-]*\.fbcdn\.net$/,
       /^external[\w-]*\.xx\.fbcdn\.net$/,      // external-xxx.xx.fbcdn.net (og:image)
       /\.snapcdn\.app$/,
+      // Third-party API CDNs
+      /\.igram\.world$/,
       // TikTok CDN
       /\.tiktokcdn\.com$/,
       /\.tiktokcdn-us\.com$/,
@@ -136,6 +139,9 @@ function isAllowedCdnUrl(urlString) {
 function getRefererForCdn(urlString) {
   try {
     const host = new URL(urlString).hostname.toLowerCase();
+    if (host.includes("igram.world")) {
+      return "https://igram.world/";
+    }
     if (host.includes("tikwm")) {
       return "https://www.tikwm.com/";
     }
@@ -230,6 +236,7 @@ app.get("/api/status", async (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
 
 /**
  * POST /api/fetch

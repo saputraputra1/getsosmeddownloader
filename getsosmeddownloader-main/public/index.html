@@ -9,6 +9,11 @@
   <meta name="theme-color" content="#0a0a12" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <meta property="og:title" content="MediaGet — Download Media Sosmed" />
+  <meta property="og:description" content="Unduh video, foto, story, dan audio dari platform favorit dalam 1 klik." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="/logo.png" />
+  <link rel="icon" type="image/png" href="/logo.png" />
   <link rel="manifest" href="/manifest.json" />
   <title>MediaGet — Download Media Sosmed</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -43,16 +48,19 @@
       --green: #10b981;
       --red: #ef4444;
       --orange: #f59e0b;
-      --text: #eeeef8;
-      --text2: #c0c0d8;
-      --muted: #6b6b8a;
-      --border: rgba(255, 255, 255, 0.06);
-      --border2: rgba(255, 255, 255, 0.1);
+      --text: #f0f0fa;
+      --text2: #d0d0e8;
+      --muted: #8888aa;
+      --border: rgba(255, 255, 255, 0.07);
+      --border2: rgba(255, 255, 255, 0.12);
       --radius: 14px;
       --radius-sm: 10px;
       --radius-xs: 8px;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --shadow-card: 0 4px 24px rgba(0,0,0,0.25), 0 1px 4px rgba(0,0,0,0.15);
+      --shadow-card-hover: 0 8px 40px rgba(139, 92, 246, 0.12), 0 2px 8px rgba(0,0,0,0.2);
+      --shadow-fab: 0 6px 24px rgba(139, 92, 246, 0.35);
     }
 
     body.light-theme {
@@ -67,9 +75,12 @@
       --accent-glow: rgba(124, 58, 237, 0.2);
       --text: #0f172a;
       --text2: #334155;
-      --muted: #64748b;
+      --muted: #94a3b8;
       --border: rgba(0, 0, 0, 0.08);
       --border2: rgba(0, 0, 0, 0.12);
+      --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0,0,0,0.04);
+      --shadow-card-hover: 0 8px 32px rgba(124, 58, 237, 0.1), 0 2px 8px rgba(0,0,0,0.06);
+      --shadow-fab: 0 6px 24px rgba(124, 58, 237, 0.3);
     }
 
     body.light-theme .ambient-1 {
@@ -89,9 +100,10 @@
       -ms-text-size-adjust: 100%;
       touch-action: manipulation;
       font-size: 16px;
-      /* Disable zoom */
       -webkit-user-select: none;
       -webkit-touch-callout: none;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
 
     body {
@@ -102,11 +114,12 @@
       display: flex;
       flex-direction: column;
       overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       max-width: 100vw;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       -webkit-tap-highlight-color: transparent;
-      overscroll-behavior-y: contain;
       word-break: break-word;
       position: relative;
     }
@@ -130,11 +143,7 @@
     }
 
     .particle {
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
-      opacity: 0;
-      animation: float linear infinite;
+      display: none;
     }
 
     .particle.p1 {
@@ -227,10 +236,7 @@
     }
 
     .wave {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      opacity: 0.03;
+      display: none;
     }
 
     .wave-layer {
@@ -279,14 +285,7 @@
     }
 
     .grid-overlay {
-      position: absolute;
-      inset: 0;
-      background-image: 
-        linear-gradient(rgba(139, 92, 246, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(139, 92, 246, 0.03) 1px, transparent 1px);
-      background-size: 50px 50px;
-      opacity: 0.4;
-      animation: gridMove 30s linear infinite;
+      display: none;
     }
 
     @keyframes gridMove {
@@ -302,8 +301,7 @@
       position: absolute;
       border-radius: 50%;
       filter: blur(80px);
-      opacity: 0.15;
-      animation: pulse 8s ease-in-out infinite;
+      opacity: 0.1;
     }
 
     .glow-orb.orb1 {
@@ -348,14 +346,7 @@
 
     /* ─── Meteor Shower Effect ─── */
     .meteor {
-      position: absolute;
-      width: 2px;
-      height: 80px;
-      background: linear-gradient(180deg, transparent, rgba(139, 92, 246, 0.8), transparent);
-      border-radius: 50%;
-      animation: meteor linear infinite;
-      pointer-events: none;
-      opacity: 0;
+      display: none;
     }
 
     .meteor.m1 {
@@ -407,36 +398,14 @@
       }
     }
 
-    /* ─── Cursor Glow Trail ─── */
+    /* ─── Cursor Glow Trail (disabled for performance) ─── */
     .cursor-glow {
-      position: fixed;
-      width: 300px;
-      height: 300px;
-      background: radial-gradient(circle, rgba(139, 92, 246, 0.15), transparent 70%);
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 9999;
-      transform: translate(-50%, -50%);
-      transition: opacity 0.3s;
-      opacity: 0;
-      mix-blend-mode: screen;
-    }
-
-    body:hover .cursor-glow {
-      opacity: 1;
+      display: none;
     }
 
     /* ─── Floating Sparkles ─── */
     .sparkle {
-      position: absolute;
-      width: 3px;
-      height: 3px;
-      background: white;
-      border-radius: 50%;
-      box-shadow: 0 0 10px rgba(139, 92, 246, 0.8);
-      animation: sparkle 2s ease-in-out infinite;
-      pointer-events: none;
-      opacity: 0;
+      display: none;
     }
 
     .sparkle.s1 {
@@ -503,13 +472,9 @@
       background: linear-gradient(
         135deg,
         rgba(139, 92, 246, 0.02) 0%,
-        rgba(236, 72, 153, 0.02) 25%,
-        rgba(6, 182, 212, 0.02) 50%,
-        rgba(139, 92, 246, 0.02) 75%,
-        rgba(236, 72, 153, 0.02) 100%
+        rgba(236, 72, 153, 0.02) 50%,
+        rgba(6, 182, 212, 0.02) 100%
       );
-      background-size: 400% 400%;
-      animation: gradientShift 15s ease infinite;
       z-index: 0;
       pointer-events: none;
     }
@@ -566,24 +531,38 @@
     .app-icon {
       width: 36px;
       height: 36px;
-      background: linear-gradient(135deg, var(--accent), var(--pink));
+      background: transparent;
       border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 16px;
-      box-shadow: 0 2px 12px var(--accent-glow);
+    }
+
+    .app-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
     }
 
     .app-name {
       font-weight: 800;
-      font-size: 18px;
+      font-size: 17px;
       background: linear-gradient(135deg, var(--accent-light), var(--pink));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      line-height: 1.1;
+    }
+
+    .app-tagline {
+      font-size: 9px;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      line-height: 1;
     }
 
     .topbar-right {
@@ -611,10 +590,37 @@
       flex-shrink: 0;
     }
 
+    .icon-btn:hover {
+      background: var(--surface2);
+      color: var(--text2);
+      border-color: var(--border2);
+    }
+
     .icon-btn:active {
       transform: scale(0.92);
-      background: var(--surface2);
+      background: var(--surface3);
     }
+
+    /* Tooltip */
+    .icon-btn[data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: -32px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface3);
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
+      z-index: 200;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      pointer-events: none;
+      animation: tooltipIn 0.15s ease;
+    }
+    @keyframes tooltipIn { from { opacity:0; transform:translateX(-50%) translateY(4px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 
     .badge-dot {
       position: absolute;
@@ -649,15 +655,15 @@
     /* ─── Hero ─── */
     .hero {
       text-align: center;
-      margin-bottom: 28px;
+      margin-bottom: 32px;
     }
 
     .hero h1 {
-      font-size: 26px;
+      font-size: 28px;
       font-weight: 900;
-      line-height: 1.2;
-      margin-bottom: 10px;
-      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 12px;
+      letter-spacing: -0.04em;
     }
 
     .hero .glow {
@@ -669,7 +675,10 @@
     .hero p {
       color: var(--muted);
       font-size: 14px;
-      line-height: 1.5;
+      line-height: 1.6;
+      font-weight: 400;
+      max-width: 340px;
+      margin: 0 auto;
     }
 
     /* ─── Platform pills ─── */
@@ -695,7 +704,22 @@
       color: var(--text2);
       transition: all 0.2s;
       white-space: nowrap;
+      cursor: default;
     }
+
+    .platform-pill:hover {
+      transform: translateY(-1px);
+      border-color: var(--border2);
+    }
+
+    .platform-pill.ig:hover { box-shadow: 0 2px 12px rgba(224, 64, 251, 0.2); }
+    .platform-pill.tt:hover { box-shadow: 0 2px 12px rgba(6, 182, 212, 0.2); }
+    .platform-pill.yt:hover { box-shadow: 0 2px 12px rgba(239, 68, 68, 0.2); }
+    .platform-pill.fb:hover { box-shadow: 0 2px 12px rgba(59, 130, 246, 0.2); }
+    .platform-pill.tw:hover { box-shadow: 0 2px 12px rgba(255, 255, 255, 0.15); }
+    .platform-pill.sp:hover { box-shadow: 0 2px 12px rgba(30, 215, 96, 0.2); }
+    .platform-pill.pi:hover { box-shadow: 0 2px 12px rgba(230, 0, 35, 0.2); }
+    .platform-pill.th:hover { box-shadow: 0 2px 12px rgba(255, 255, 255, 0.12); }
 
     .platform-pill.ig {
       border-color: rgba(224, 64, 251, 0.2);
@@ -1011,6 +1035,11 @@
       box-shadow: 0 1px 6px var(--accent-glow);
     }
 
+    .fetch-btn:hover:not(:disabled) {
+      filter: brightness(1.1);
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+
     .fetch-btn:disabled {
       opacity: 0.4;
       cursor: not-allowed;
@@ -1105,12 +1134,12 @@
       box-sizing: border-box;
       min-width: 0;
       position: relative;
-      transform-style: preserve-3d;
-      transition: transform 0.1s ease-out, box-shadow 0.3s;
+      box-shadow: var(--shadow-card);
+      transition: box-shadow 0.3s;
     }
 
     .card:hover {
-      box-shadow: 0 12px 40px rgba(139, 92, 246, 0.15);
+      box-shadow: var(--shadow-card-hover);
     }
 
     @keyframes cardIn {
@@ -1365,6 +1394,11 @@
     .fmt-btn:active {
       transform: scale(0.98);
       background: rgba(139, 92, 246, 0.08);
+    }
+
+    .fmt-btn:hover {
+      background: var(--surface3);
+      border-color: var(--border2);
     }
 
     .fmt-btn span {
@@ -1830,7 +1864,8 @@
       }
 
       .hero h1 {
-        font-size: 32px;
+        font-size: 34px;
+        letter-spacing: -0.05em;
       }
 
       .topbar {
@@ -1956,6 +1991,282 @@
       max-width: 100%;
       height: auto;
     }
+
+    /* ─── Toast Notification ─── */
+    .toast-container {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      pointer-events: none;
+      max-width: 380px;
+      width: 90%;
+    }
+    .toast {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      backdrop-filter: blur(16px);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+    }
+    .toast.success { border-color: rgba(16,185,129,0.3); }
+    .toast.error { border-color: rgba(239,68,68,0.3); }
+    .toast.info { border-color: rgba(139,92,246,0.3); }
+    .toast-icon { font-size: 18px; flex-shrink: 0; }
+    .toast.out { animation: toastOut 0.3s ease forwards; }
+    @keyframes toastIn { from { opacity:0; transform:translateY(20px) scale(0.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+    @keyframes toastOut { to { opacity:0; transform:translateY(20px) scale(0.95); } }
+
+    /* ─── Skeleton Loading ─── */
+    .skeleton-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      animation: cardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .skeleton-row { display: flex; gap: 12px; align-items: center; }
+    .skeleton-circle {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      flex-shrink: 0;
+    }
+    .skeleton-line {
+      height: 12px; border-radius: 6px;
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    .skeleton-line.w60 { width: 60%; }
+    .skeleton-line.w40 { width: 40%; }
+    .skeleton-line.w80 { width: 80%; }
+    .skeleton-thumb {
+      width: 100px; aspect-ratio: 1; border-radius: var(--radius-xs);
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      margin-top: 12px;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ─── Confetti ─── */
+    .confetti-piece {
+      position: fixed;
+      width: 8px; height: 8px;
+      z-index: 10001;
+      pointer-events: none;
+      animation: confettiFall 1.5s ease-out forwards;
+    }
+    @keyframes confettiFall {
+      0% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+      100% { opacity: 0; transform: translateY(100vh) rotate(720deg) scale(0.3); }
+    }
+
+    /* ─── Media Filter Tabs ─── */
+    .media-filter {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .filter-tab {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .filter-tab:hover { border-color: var(--border2); color: var(--text2); }
+    .filter-tab.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent-light);
+    }
+
+    /* ─── Carousel Counter Badge ─── */
+    .carousel-counter {
+      position: absolute;
+      top: 5px; right: 5px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(6px);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 5px;
+    }
+
+    /* ─── FAB (Floating Action Button) ─── */
+    .fab {
+      position: fixed;
+      bottom: calc(20px + var(--safe-bottom));
+      right: 16px;
+      z-index: 99;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .fab-btn {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      border: 1px solid var(--border2);
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      transition: all 0.2s;
+      font-size: 18px;
+    }
+    .fab-btn:hover { transform: scale(1.1); background: var(--surface2); }
+    .fab-btn:active { transform: scale(0.95); }
+    .fab-btn.primary {
+      background: linear-gradient(135deg, var(--accent), var(--pink));
+      color: #fff;
+      border: none;
+      width: 56px; height: 56px;
+      font-size: 22px;
+      box-shadow: var(--shadow-fab);
+    }
+
+    .fab-btn.primary:hover { box-shadow: 0 8px 32px rgba(139, 92, 246, 0.5); }
+
+    /* ─── Drag & Drop Overlay ─── */
+    .drop-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9998;
+      background: rgba(10,10,18,0.85);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .drop-overlay.active { display: flex; }
+    .drop-box {
+      border: 3px dashed var(--accent);
+      border-radius: 24px;
+      padding: 60px;
+      text-align: center;
+      color: var(--accent-light);
+      font-size: 18px;
+      font-weight: 700;
+      animation: dropPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes dropPulse {
+      0%,100% { border-color: var(--accent); transform: scale(1); }
+      50% { border-color: var(--pink); transform: scale(1.02); }
+    }
+
+    /* ─── Platform Color Borders on Cards ─── */
+    .card.pf-instagram { border-left: 3px solid #e040fb; }
+    .card.pf-tiktok { border-left: 3px solid #06b6d4; }
+    .card.pf-youtube { border-left: 3px solid #ef4444; }
+    .card.pf-facebook { border-left: 3px solid #3b82f6; }
+    .card.pf-twitter { border-left: 3px solid #ffffff40; }
+    .card.pf-spotify { border-left: 3px solid #1ed760; }
+    .card.pf-pinterest { border-left: 3px solid #e60023; }
+    .card.pf-threads { border-left: 3px solid #ffffff30; }
+
+    /* ─── Search History Input ─── */
+    .hist-search {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .hist-search:focus { border-color: var(--accent); }
+    .hist-search::placeholder { color: var(--muted); }
+
+    /* ─── Footer ─── */
+    .footer {
+      text-align: center;
+      padding: 24px 12px 16px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+      border-top: 1px solid var(--border);
+      margin-top: 32px;
+    }
+    .footer a {
+      color: var(--accent-light);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer a:hover { color: var(--pink); }
+    .footer-brand {
+      font-weight: 700;
+      font-size: 12px;
+      background: linear-gradient(135deg, var(--accent-light), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* ─── Empty State ─── */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+    .empty-state svg {
+      opacity: 0.3;
+      margin-bottom: 16px;
+    }
+    .empty-state-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+    .empty-state-desc {
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ─── Result Badge Counter ─── */
+    .result-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent-light);
+      background: var(--accent-dim);
+      padding: 6px 14px;
+      border-radius: 100px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(139, 92, 246, 0.2);
+    }
   </style>
 </head>
 
@@ -2014,21 +2325,19 @@
   <div class="topbar">
     <div class="topbar-left">
       <div class="app-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5"
-          stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
+        <img src="/logo.png" alt="MediaGet Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 10px;">
       </div>
-      <div class="app-name">MediaGet</div>
+      <div class="app-brand">
+        <div class="app-name">MediaGet</div>
+        <div class="app-tagline">Download media sosmed</div>
+      </div>
     </div>
     <div class="topbar-right">
-      <button class="icon-btn" id="langBtn" onclick="toggleLang()" aria-label="Bahasa"
+      <button class="icon-btn" id="langBtn" onclick="toggleLang()" data-tooltip="Bahasa"
         style="display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;font-family:'Inter',sans-serif">
         ID
       </button>
-      <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" aria-label="Tema"
+      <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" data-tooltip="Tema"
         style="display:flex;align-items:center;justify-content:center;">
         <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2043,7 +2352,7 @@
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
         </svg>
       </button>
-      <button class="icon-btn" id="helpBtn" onclick="openHelp()" aria-label="Panduan & Fitur"
+      <button class="icon-btn" id="helpBtn" onclick="openHelp()" data-tooltip="Panduan"
         style="display:flex;align-items:center;justify-content:center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
@@ -2052,7 +2361,7 @@
           <line x1="12" y1="17" x2="12.01" y2="17"></line>
         </svg>
       </button>
-      <button class="icon-btn" id="historyBtn" onclick="toggleSheet()" aria-label="Riwayat"
+      <button class="icon-btn" id="historyBtn" onclick="toggleSheet()" data-tooltip="Riwayat"
         style="display:flex;align-items:center;justify-content:center;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
@@ -2141,7 +2450,7 @@
               <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
             </svg> <span data-i18n="btnPrivate">Mode Private</span></button>
         </div>
-        <button class="fetch-btn" id="fetchBtn" onclick="fetchMedia()"><span data-i18n="btnFetch">Ambil
+        <button class="fetch-btn" id="fetchBtn" onclick="fetchMedia()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-i18n="btnFetch">Ambil
             Media</span></button>
       </div>
     </div>
@@ -2204,8 +2513,46 @@
     </div>
 
     <!-- Results -->
-    <div id="resultsContainer"></div>
+    <div id="resultBadge" class="result-badge" style="display:none;"></div>
+    <div id="resultsContainer">
+      <div class="empty-state" id="emptyState">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+        </svg>
+        <div class="empty-state-title">Masukkan link media sosial</div>
+        <div class="empty-state-desc">Tempel link Instagram, TikTok, YouTube, atau platform lain di atas untuk mulai download.</div>
+      </div>
+    </div>
 
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-brand">MediaGet</div>
+      <div style="margin-top:4px;">&copy; 2025 MediaGet &middot; Download media sosmed gratis</div>
+    </footer>
+
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Drag & Drop Overlay -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-box">
+      <div style="font-size:48px;margin-bottom:12px;">📎</div>
+      Drop link di sini
+    </div>
+  </div>
+
+  <!-- Floating Action Buttons -->
+  <div class="fab" id="fabArea" style="display:none">
+    <button class="fab-btn" onclick="scrollToTop()" title="Ke Atas">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+    </button>
+    <button class="fab-btn primary" onclick="copyAllLinks()" title="Copy Semua Link">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+    </button>
   </div>
 
   <!-- Preview Modal -->
@@ -2336,66 +2683,10 @@
   </div>
 
   <script>
-    // ─── Cursor Glow Effect ───
-    const cursorGlow = document.querySelector('.cursor-glow');
-    let mouseX = 0, mouseY = 0;
-    let glowX = 0, glowY = 0;
+    // ─── Cursor Glow Effect (disabled for performance) ───
 
-    document.addEventListener('mousemove', (e) => {
-      mouseX = e.clientX;
-      mouseY = e.clientY;
-    });
-
-    function animateCursorGlow() {
-      glowX += (mouseX - glowX) * 0.1;
-      glowY += (mouseY - glowY) * 0.1;
-      
-      if (cursorGlow) {
-        cursorGlow.style.left = glowX + 'px';
-        cursorGlow.style.top = glowY + 'px';
-      }
-      
-      requestAnimationFrame(animateCursorGlow);
-    }
-
-    animateCursorGlow();
-
-    // ─── 3D Card Tilt Effect ───
-    function init3DCards() {
-      const cards = document.querySelectorAll('.card');
-      
-      cards.forEach(card => {
-        card.addEventListener('mousemove', (e) => {
-          const rect = card.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          
-          const centerX = rect.width / 2;
-          const centerY = rect.height / 2;
-          
-          const rotateX = (y - centerY) / 20;
-          const rotateY = (centerX - x) / 20;
-          
-          card.style.transform = `
-            perspective(1000px) 
-            rotateX(${rotateX}deg) 
-            rotateY(${rotateY}deg) 
-            scale3d(1.02, 1.02, 1.02)
-          `;
-        });
-        
-        card.addEventListener('mouseleave', () => {
-          card.style.transform = 'perspective(1000px) rotateX(0) rotateY(0) scale3d(1, 1, 1)';
-        });
-      });
-    }
-
-    // Re-init 3D cards when new results are loaded
-    setInterval(() => {
-      if (document.querySelectorAll('.card').length > 0) {
-        init3DCards();
-      }
-    }, 1000);
+    // ─── 3D Card Tilt Effect (disabled for performance) ───
+    function init3DCards() {}
 
     const API = window.location.origin;
     let gResults = [];
@@ -2464,7 +2755,9 @@
       applyLang();
     }
 
-    document.addEventListener('DOMContentLoaded', applyLang);
+    document.addEventListener('DOMContentLoaded', () => {
+      applyLang();
+    });
 
     // ═══════════ PASTE ═══════════
     async function pasteClip() {
@@ -2516,7 +2809,7 @@
       const bg = document.getElementById('sheetBg');
       const open = s.classList.contains('open');
       if (open) { s.classList.remove('open'); bg.classList.remove('open'); }
-      else { renderHist(); renderStats(); s.classList.add('open'); bg.classList.add('open'); }
+      else { renderHist(); renderHistSearch(); renderStats(); s.classList.add('open'); bg.classList.add('open'); }
     }
 
     function renderHist() {
@@ -2606,7 +2899,7 @@
     // ═══════════ FETCH ═══════════
     let abortCtl = null;
 
-    async function fetchMedia() {
+    async function fetchMedia(isRetry = false) {
       const text = document.getElementById('urlInput').value.trim();
       const btn = document.getElementById('fetchBtn');
       const ld = document.getElementById('statusLoad');
@@ -2623,6 +2916,12 @@
 
       er.style.display = 'none';
       rc.innerHTML = '';
+      // Reset empty state & badge
+      const emptyEl = document.getElementById('emptyState');
+      if (emptyEl) emptyEl.style.display = 'none';
+      const badgeEl = document.getElementById('resultBadge');
+      if (badgeEl) badgeEl.style.display = 'none';
+      showSkeleton();
       bb.style.display = 'none';
       ld.classList.add('loading');
       lt.textContent = 'Memproses...';
@@ -2692,9 +2991,11 @@
           const ep = isPrivateMode ? '/api/fetch-private' : '/api/fetch';
           const bodyPayload = isPrivateMode ? { html: text } : { urls };
 
+          const headers = { 'Content-Type': 'application/json' };
+
           const resp = await fetch(`${API}${ep}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(bodyPayload),
             signal: abortCtl.signal,
           });
@@ -2716,10 +3017,25 @@
         }
 
         saveHist(urls, gResults);
+        hideSkeleton();
+
+        // Hide empty state
+        const emptyEl = document.getElementById('emptyState');
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        // Show result badge counter
+        const totalMedia = gResults.reduce((sum, d) => sum + (d.mediaItems ? d.mediaItems.length : 0), 0);
+        const badgeEl = document.getElementById('resultBadge');
+        if (badgeEl) { badgeEl.innerHTML = `✓ ${gResults.length} postingan · ${totalMedia} media`; badgeEl.style.display = 'inline-flex'; }
 
         gResults.forEach(d => rc.appendChild(makeCard(d)));
+        renderFilterTabs();
+        updateFab();
         if (gResults.length > 1 || (gResults[0] && gResults[0].mediaItems.length > 1)) bb.style.display = 'flex';
+        showConfetti();
+        showToast(`${gResults.length} hasil ditemukan!`, 'success');
       } catch (err) {
+        hideSkeleton();
         if (err.name === 'AbortError') showErr('Timeout — server terlalu lama.\nCoba lagi atau gunakan URL lain.');
         else showErr(err.message || 'Terjadi kesalahan.');
       } finally { cleanup(); }
@@ -2767,6 +3083,12 @@
 
       er.style.display = 'none';
       rc.innerHTML = '';
+      // Reset empty state & badge
+      const emptyEl = document.getElementById('emptyState');
+      if (emptyEl) emptyEl.style.display = 'none';
+      const badgeEl = document.getElementById('resultBadge');
+      if (badgeEl) badgeEl.style.display = 'none';
+      showSkeleton();
       bb.style.display = 'none';
       ld.classList.add('loading');
       lt.textContent = `Mengambil TikTok Stories untuk @${username}...`;
@@ -2820,10 +3142,25 @@
         // Simpan ke riwayat dengan format URL khusus agar mudah dikenali
         const pseudoUrl = `tiktok.com/@${username}/stories`;
         saveHist([pseudoUrl], gResults);
+        hideSkeleton();
+
+        // Hide empty state
+        const emptyEl = document.getElementById('emptyState');
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        // Show result badge counter
+        const totalMedia = gResults.reduce((sum, d) => sum + (d.mediaItems ? d.mediaItems.length : 0), 0);
+        const badgeEl = document.getElementById('resultBadge');
+        if (badgeEl) { badgeEl.innerHTML = `✓ ${gResults.length} stories · ${totalMedia} media`; badgeEl.style.display = 'inline-flex'; }
 
         gResults.forEach(d => rc.appendChild(makeCard(d)));
+        renderFilterTabs();
+        updateFab();
         if (gResults.length > 1 || (gResults[0] && gResults[0].mediaItems.length > 1)) bb.style.display = 'flex';
+        showConfetti();
+        showToast(`${gResults.length} stories ditemukan!`, 'success');
       } catch (err) {
+        hideSkeleton();
         if (err.name === 'AbortError') showErr('Timeout — server terlalu lama.\nCoba lagi nanti.');
         else showErr(err.message || 'Terjadi kesalahan.');
       } finally { cleanup(); }
@@ -2843,7 +3180,7 @@
 
     function makeCard(data) {
       const el = document.createElement('div');
-      el.className = 'card';
+      el.className = `card pf-${data.platform || 'unknown'}`;
       const a = data.author || 'unknown';
       const init = a[0].toUpperCase();
       const pn = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', twitter: 'X (Twitter)', spotify: 'Spotify', pinterest: 'Pinterest', threads: 'Threads' };
@@ -2861,11 +3198,14 @@
         titleLine = `<div class="card-title">${esc(data.title)}</div>`;
       }
 
+      let timeHtml = data.timestamp ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">🕒 ${esc(data.timestamp)}</div>` : '';
+
       let html = `<div class="card-head">
       <div class="avatar">${init}</div>
       <div class="card-info">
         <div class="card-author">@${esc(a)}</div>
         ${titleLine}
+        ${timeHtml}
         <div class="tag-row">
           <span class="tag ${p}">${pn[p] || p}</span>
           <span class="tag type">${typeIcon}</span>
@@ -2873,7 +3213,9 @@
       </div>
     </div>`;
 
-      data.mediaItems.forEach(item => {
+      const totalItems = data.mediaItems.length;
+      data.mediaItems.forEach((item, idx) => {
+        const mediaIdx = idx + 1;
         const thu = item.thumbnail || item.url;
         // Jika base64 data: URL atau local URL, gunakan langsung tanpa proxy
         const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp')))
@@ -2884,8 +3226,9 @@
         const encT = encodeURIComponent(data.title || a || 'media');
 
         const miniPlay = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right:2px;vertical-align:-1px"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-        const badge = item.type === 'video' && item.duration
-          ? `<span class="thumb-badge" style="display:flex;align-items:center">${miniPlay}${fmtDur(item.duration)}</span>` : '';
+        let typeBadgeStr = item.type === 'video' ? `<span style="position:absolute;top:6px;left:6px;background:var(--red);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:bold;z-index:10;">VIDEO</span>` : `<span style="position:absolute;top:6px;left:6px;background:var(--cyan);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:bold;z-index:10;">FOTO</span>`;
+        const badge = (item.type === 'video' && item.duration
+          ? `<span class="thumb-badge" style="display:flex;align-items:center">${miniPlay}${fmtDur(item.duration)}</span>` : '') + typeBadgeStr;
 
         const playSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-left:2px"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
         const searchSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>';
@@ -2955,10 +3298,11 @@
         }
         premiumActions += `</div>`;
 
-        html += `<div class="media-item">
+        const counterBadge = totalItems > 1 ? `<span class="carousel-counter">${mediaIdx}/${totalItems}</span>` : '';
+        html += `<div class="media-item" data-media-type="${item.type || 'image'}">
         <div class="thumb-row">
-          <div class="thumb" onclick="openPrev('${safeMediaUrl}','${item.type}','${prevTitle}')">
-            <img src="${proxy}" loading="lazy" />${badge}${playOvr}
+          <div class="thumb" onclick="openPrev('${safeMediaUrl}','${item.type}','${prevTitle}')" style="position:relative">
+            <img src="${proxy}" loading="lazy" />${badge}${playOvr}${counterBadge}
           </div>
           <div class="thumb-info">
             <div class="thumb-info-title">${item.type === 'video' ? 'Video' : 'Foto'}${item.duration ? ' • ' + fmtDur(item.duration) : ''}</div>
@@ -2979,8 +3323,75 @@
         html += `<div class="card-caption">${esc(cap)}</div>`;
       }
 
+      if (totalItems > 1) {
+        const dlAllBtnId = 'dlAllBtn_' + Math.random().toString(36).substr(2, 5);
+        window.tempCardData = window.tempCardData || {};
+        window.tempCardData[dlAllBtnId] = data;
+        
+        html += `<button id="${dlAllBtnId}" class="fmt-btn" style="background:var(--accent);color:#fff;margin-top:12px;width:100%;font-weight:bold;justify-content:center" onclick="dlCardAsZip('${dlAllBtnId}')">
+          <span style="display:flex;align-items:center;gap:6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download Semua (ZIP)</span>
+        </button>`;
+      }
+
       el.innerHTML = html;
       return el;
+    }
+
+    async function dlCardAsZip(btnId) {
+      const data = window.tempCardData ? window.tempCardData[btnId] : null;
+      if (!data) return;
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+
+      const orig = btn.innerHTML;
+      btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Memproses...`;
+      btn.style.pointerEvents = 'none';
+      btn.style.opacity = '0.7';
+
+      try {
+        const zip = new JSZip();
+        let count = 0;
+        const tasks = [];
+
+        data.mediaItems.forEach(item => {
+          let u = item.url, e = item.ext || (item.type === 'video' ? 'mp4' : 'jpg');
+          if (item.formats?.length) {
+            const vf = item.formats.find(f => f.type === 'video' && f.quality === 'HD No Watermark')
+              || item.formats.find(f => f.type === 'video' && f.quality === 'No Watermark')
+              || item.formats.find(f => f.type === 'video')
+              || item.formats[0];
+            u = vf.url; e = vf.ext;
+          }
+          const fn = `${data.platform || 'media'}_${count + 1}_${Date.now()}.${e}`;
+          const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp') || u.startsWith('data:'))
+            ? u
+            : `${API}/api/proxy?url=${encodeURIComponent(u)}`;
+          tasks.push({ url: proxy, filename: fn });
+          count++;
+        });
+
+        let completed = 0;
+        const downloadPromises = tasks.map(async (t) => {
+          const r = await fetch(t.url);
+          if (!r.ok) throw new Error('Gagal download ' + t.filename);
+          const blob = await r.blob();
+          zip.file(t.filename, blob);
+          completed++;
+          btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Download ${completed}/${tasks.length}`;
+        });
+        await Promise.all(downloadPromises);
+
+        btn.innerHTML = `<div class="spin" style="width:14px;height:14px;border-width:2px;margin-right:6px"></div> Zipping...`;
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        saveAs(zipBlob, `${data.author || 'MediaGet'}_${Date.now()}.zip`);
+
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><polyline points="20 6 9 17 4 12"></polyline></svg> Selesai!`;
+        setTimeout(() => { btn.innerHTML = orig; btn.style.pointerEvents = ''; btn.style.opacity = '1'; }, 3000);
+      } catch (err) {
+        console.error(err);
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg> Gagal`;
+        setTimeout(() => { btn.innerHTML = orig; btn.style.pointerEvents = ''; btn.style.opacity = '1'; }, 3000);
+      }
     }
 
     function fmtDur(s) {
@@ -3497,6 +3908,233 @@
         setTimeout(() => { btn.innerHTML = orig; btn.style.pointerEvents = ''; btn.style.opacity = '1'; }, 3000);
       }
     }
+
+
+    // ═══════════ TOAST NOTIFICATIONS ═══════════
+    function showToast(msg, type = 'info', duration = 3000) {
+      const c = document.getElementById('toastContainer');
+      const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span>${msg}</span>`;
+      c.appendChild(t);
+      setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, duration);
+    }
+
+    // ═══════════ CONFETTI CELEBRATION ═══════════
+    function showConfetti() {
+      const colors = ['#8b5cf6', '#ec4899', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
+      for (let i = 0; i < 30; i++) {
+        const el = document.createElement('div');
+        el.className = 'confetti-piece';
+        el.style.left = Math.random() * 100 + 'vw';
+        el.style.top = '-10px';
+        el.style.background = colors[Math.floor(Math.random() * colors.length)];
+        el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+        el.style.width = (4 + Math.random() * 8) + 'px';
+        el.style.height = (4 + Math.random() * 8) + 'px';
+        el.style.animationDuration = (1 + Math.random()) + 's';
+        el.style.animationDelay = (Math.random() * 0.5) + 's';
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 2500);
+      }
+    }
+
+    // ═══════════ SKELETON LOADING ═══════════
+    function showSkeleton() {
+      const rc = document.getElementById('resultsContainer');
+      const skel = document.createElement('div');
+      skel.id = 'skeletonLoader';
+      skel.innerHTML = `
+        <div class="skeleton-card">
+          <div class="skeleton-row">
+            <div class="skeleton-circle"></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+              <div class="skeleton-line w60"></div>
+              <div class="skeleton-line w40"></div>
+            </div>
+          </div>
+          <div class="skeleton-thumb"></div>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+            <div class="skeleton-line w80"></div>
+            <div class="skeleton-line w60"></div>
+          </div>
+        </div>`;
+      rc.prepend(skel);
+    }
+    function hideSkeleton() {
+      const s = document.getElementById('skeletonLoader');
+      if (s) s.remove();
+    }
+
+    // ═══════════ COPY ALL LINKS ═══════════
+    function copyAllLinks() {
+      if (!gResults.length) { showToast('Belum ada media', 'warning'); return; }
+      const links = [];
+      gResults.forEach(d => {
+        d.mediaItems.forEach(item => {
+          if (item.formats?.length) {
+            const best = item.formats.find(f => f.type === 'video' && f.quality === 'HD No Watermark')
+              || item.formats.find(f => f.type === 'video')
+              || item.formats[0];
+            if (best?.url) links.push(best.url);
+          } else if (item.url) {
+            links.push(item.url);
+          }
+        });
+      });
+      if (!links.length) { showToast('Tidak ada link', 'warning'); return; }
+      navigator.clipboard.writeText(links.join('\n')).then(() => {
+        showToast(`${links.length} link berhasil dicopy!`, 'success');
+      }).catch(() => {
+        showToast('Gagal copy link', 'error');
+      });
+    }
+
+    // ═══════════ SCROLL TO TOP ═══════════
+    function scrollToTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ═══════════ SHOW/HIDE FAB ═══════════
+    function updateFab() {
+      const fab = document.getElementById('fabArea');
+      fab.style.display = gResults.length > 0 ? 'flex' : 'none';
+    }
+
+    // ═══════════ MEDIA FILTER TABS ═══════════
+    let activeFilter = 'all';
+    function renderFilterTabs() {
+      const existing = document.getElementById('mediaFilterTabs');
+      if (existing) existing.remove();
+      if (!gResults.length) return;
+
+      const rc = document.getElementById('resultsContainer');
+      const allItems = [];
+      gResults.forEach(d => d.mediaItems.forEach(item => allItems.push(item)));
+      const hasVideo = allItems.some(i => i.type === 'video');
+      const hasImage = allItems.some(i => i.type === 'image');
+      const hasAudio = allItems.some(i => i.type === 'audio' || i.ext === 'mp3');
+
+      if (!hasVideo && !hasImage && !hasAudio) return;
+
+      const tabs = document.createElement('div');
+      tabs.id = 'mediaFilterTabs';
+      tabs.className = 'media-filter';
+      tabs.innerHTML = `
+        <button class="filter-tab ${activeFilter === 'all' ? 'active' : ''}" onclick="filterMedia('all')">Semua (${allItems.length})</button>
+        ${hasVideo ? `<button class="filter-tab ${activeFilter === 'video' ? 'active' : ''}" onclick="filterMedia('video')">Video (${allItems.filter(i => i.type === 'video').length})</button>` : ''}
+        ${hasImage ? `<button class="filter-tab ${activeFilter === 'image' ? 'active' : ''}" onclick="filterMedia('image')">Foto (${allItems.filter(i => i.type === 'image').length})</button>` : ''}
+        ${hasAudio ? `<button class="filter-tab ${activeFilter === 'audio' ? 'active' : ''}" onclick="filterMedia('audio')">Audio</button>` : ''}
+      `;
+      rc.before(tabs);
+    }
+
+    function filterMedia(type) {
+      activeFilter = type;
+      renderFilterTabs();
+      document.querySelectorAll('.media-item').forEach(el => {
+        const mtype = el.dataset.mediaType;
+        if (type === 'all') { el.style.display = ''; }
+        else { el.style.display = mtype === type ? '' : 'none'; }
+      });
+    }
+
+    // ═══════════ CAROUSEL COUNTER ═══════════
+    // (Added in makeCard below via data attributes)
+
+    // ═══════════ SEARCH HISTORY ═══════════
+    function renderHistSearch() {
+      const existing = document.getElementById('histSearchBox');
+      if (existing) existing.remove();
+      const list = document.getElementById('histList');
+      if (!list) return;
+      const box = document.createElement('input');
+      box.type = 'text';
+      box.id = 'histSearchBox';
+      box.className = 'hist-search';
+      box.placeholder = '🔍 Cari riwayat...';
+      box.oninput = () => {
+        const q = box.value.toLowerCase();
+        list.querySelectorAll('.hist-item').forEach(el => {
+          el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      };
+      list.before(box);
+    }
+
+    // ═══════════ DRAG & DROP ═══════════
+    let dragCounter = 0;
+    document.addEventListener('dragenter', e => {
+      e.preventDefault();
+      dragCounter++;
+      const dt = e.dataTransfer;
+      if (dt && dt.types && dt.types.includes('text/plain')) {
+        document.getElementById('dropOverlay').classList.add('active');
+      }
+    });
+    document.addEventListener('dragleave', e => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        document.getElementById('dropOverlay').classList.remove('active');
+      }
+    });
+    document.addEventListener('dragover', e => { e.preventDefault(); });
+    document.addEventListener('drop', e => {
+      e.preventDefault();
+      dragCounter = 0;
+      document.getElementById('dropOverlay').classList.remove('active');
+      const text = e.dataTransfer.getData('text/plain');
+      if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+        document.getElementById('urlInput').value = text;
+        showToast('Link terdeteksi!', 'info');
+        document.getElementById('urlInput').focus();
+      }
+    });
+
+    // ═══════════ ENHANCED KEYBOARD SHORTCUTS ═══════════
+    document.addEventListener('keydown', e => {
+      // Ctrl+V = focus input (auto-paste handled by browser)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && document.activeElement?.id !== 'urlInput') {
+        document.getElementById('urlInput').focus();
+      }
+      // Enter = fetch (when input is focused)
+      if (e.key === 'Enter' && document.activeElement?.id === 'urlInput' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        fetchMedia();
+      }
+      // Escape = close modals
+      if (e.key === 'Escape') {
+        closePreview();
+        const qr = document.getElementById('qrModal');
+        if (qr.classList.contains('open')) closeQr();
+      }
+      // Ctrl+D = download all
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        if (gResults.length > 0) downloadAllBest();
+      }
+      // Ctrl+Shift+C = copy all links
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
+        e.preventDefault();
+        copyAllLinks();
+      }
+    });
+
+    // ═══════════ PLATFORM COLOR THEME ═══════════
+    // (Applied in makeCard via pf-{platform} class)
+
+    // Show FAB when scrolled down
+    window.addEventListener('scroll', () => {
+      const fab = document.getElementById('fabArea');
+      if (window.scrollY > 300 && gResults.length > 0) {
+        fab.style.display = 'flex';
+      } else if (window.scrollY <= 0) {
+        updateFab();
+      }
+    });
 
 
     // ═══════════ KEYBOARD ═══════════
