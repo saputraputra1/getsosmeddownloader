@@ -153,8 +153,39 @@ function detectPlatform(urlString) {
   }
   return null;
 }
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Memilih satu file .txt secara acak dari folder cookies/
+ * Jika folder tidak ada atau tidak ada file .txt, return null
+ */
+function getRandomCookieFile() {
+  const fs = require('fs');
+  const path = require('path');
+  const cookiesDir = path.join(__dirname, 'cookies');
+  
+  try {
+    if (!fs.existsSync(cookiesDir)) return null;
+    
+    const files = fs.readdirSync(cookiesDir).filter(f => f.endsWith('.txt'));
+    if (files.length === 0) return null;
+    
+    // Railway: prefer railway_cookie.txt (dibuat dari env var IG_COOKIE/IG_COOKIE_BASE64)
+    if (files.includes('railway_cookie.txt')) {
+      console.log(`[Scraper] Menggunakan file cookies: railway_cookie.txt`);
+      return path.join(cookiesDir, 'railway_cookie.txt');
+    }
+    
+    // Fallback: pilih file .txt lain (untuk development lokal)
+    const chosenFile = files[0];
+    const fullPath = path.join(cookiesDir, chosenFile);
+    console.log(`[Scraper] Menggunakan file cookies: ${chosenFile}`);
+    return fullPath;
+  } catch (err) {
+    console.warn("[Scraper] Gagal membaca folder cookies:", err.message);
+    return null;
+  }
+}
 
 /**
  * Cek apakah URL adalah Instagram Story URL.
@@ -282,6 +313,8 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       break;
 
     case "youtube":
+      args.push("--extractor-args", "youtube:player_client=tv_embedded;player_skip=webpage");
+      args.push("--extractor-retries", "3");
       break;
 
     case "tiktok":
@@ -333,7 +366,8 @@ function parseYtDlpOutput(info, platform = "instagram") {
     result.type = "playlist";
     result.mediaItems = info.entries.map((entry) =>
       extractMediaItem(entry)
-    );
+    ).filter(item => item.url && item.url.length > 0);
+    console.log(`[yt-dlp] ${info.entries.length} entries → ${result.mediaItems.length} valid items (${result.mediaItems.filter(m => m.type === 'video').length} video, ${result.mediaItems.filter(m => m.type === 'image').length} foto)`);
   }
   // Single video/photo
   else {
@@ -350,179 +384,200 @@ function parseYtDlpOutput(info, platform = "instagram") {
  * Prioritas: format kualitas tertinggi → url langsung → thumbnail
  */
 function extractMediaItem(entry) {
-  const isVideo = entry.ext === "mp4" || entry.ext === "webm" ||
-    entry._type === "video" ||
-    (entry.formats && entry.formats.some((f) => f.vcodec !== "none"));
+  // ─── Deteksi video vs foto yang lebih akurat ───
+  // Instagram story foto sering dikembalikan dengan ext="mp4" oleh yt-dlp,
+  // tapi TIDAK memiliki video codec. Gunakan heuristic berlapis:
+  const hasRealVideoCodec = entry.formats && entry.formats.some((f) => 
+    f.vcodec && f.vcodec !== "none" && f.vcodec !== "null"
+  );
 
-  // Pilih format terbaik untuk video
-  let bestUrl = entry.url;
-  let availableFormats = [];
+  // Cek URL patterns yang menandakan gambar (Instagram CDN)
+  const urlStr = (entry.url || '').toLowerCase();
+  const thumbStr = (entry.thumbnail || '').toLowerCase();
+  const isImageUrl = /\.(jpg|jpeg|png|webp|heic)(\?|$)/i.test(urlStr) ||
+    urlStr.includes('39594192945134_n') || urlStr.includes('41594189195273_n') ||
+    urlStr.includes('409880325290822_n');
+
+  // Keputusan akhir: hanya anggap video jika ADA codec video asli
+  // ATAU ext video + URL bukan gambar
+  const isVideo = hasRealVideoCodec ||
+    ((entry.ext === "mp4" || entry.ext === "webm") && !isImageUrl);
+
+  // ─── Thumbnail resolusi tertinggi (untuk foto fallback) ───
+  let bestThumbnail = entry.thumbnail || null;
+  if (entry.thumbnails && entry.thumbnails.length > 0) {
+    const sorted = [...entry.thumbnails].sort((a, b) => (b.width || b.preference || 0) - (a.width || a.preference || 0));
+    bestThumbnail = sorted[0].url || sorted[0];
+  }
 
   // ─── Penanganan khusus FOTO ───
-  // Jika bukan video, cari URL gambar dari berbagai field yang mungkin tersedia
   if (!isVideo) {
-    // Coba ambil URL gambar dari berbagai sumber
-    let imageUrl = entry.url || null;
+    // Prioritas: entry.url > thumbnail resolusi tinggi > formats image
+    let imageUrl = null;
 
-    // Jika url kosong, gunakan thumbnail sebagai URL gambar utama
-    if (!imageUrl && entry.thumbnail) {
-      imageUrl = entry.thumbnail;
+    // 1. Jika URL adalah gambar, gunakan langsung
+    if (isImageUrl) {
+      imageUrl = entry.url;
     }
 
-    // Jika masih kosong, cek array thumbnails (resolusi tertinggi)
-    if (!imageUrl && entry.thumbnails && entry.thumbnails.length > 0) {
-      const sorted = [...entry.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-      imageUrl = sorted[0].url || sorted[0];
+    // 2. Fallback ke thumbnail resolusi tinggi (Instagram story photo = thumbnail = foto asli)
+    if (!imageUrl && bestThumbnail) {
+      imageUrl = bestThumbnail;
     }
 
-    // Jika ada formats, cek apakah ada format gambar di sana
-    if (entry.formats && entry.formats.length > 0) {
+    // 3. Jika masih kosong, gunakan entry.url apa adanya
+    if (!imageUrl && entry.url) {
+      imageUrl = entry.url;
+    }
+
+    // 4. Cek formats untuk gambar
+    if (!imageUrl && entry.formats && entry.formats.length > 0) {
       const imgFormats = entry.formats.filter(
-        (f) => f.url && (f.ext === 'jpg' || f.ext === 'jpeg' || f.ext === 'png' || f.ext === 'webp' || f.vcodec === 'none')
+        (f) => f.url && (
+          f.ext === 'jpg' || f.ext === 'jpeg' || f.ext === 'png' || f.ext === 'webp' ||
+          (f.vcodec === 'none' && f.acodec === 'none')
+        )
       );
       if (imgFormats.length > 0) {
-        // Pilih resolusi tertinggi
         imgFormats.sort((a, b) => (b.width || 0) - (a.width || 0));
         imageUrl = imgFormats[0].url;
       }
     }
 
+    // Tentukan ekstensi dari URL
+    let imgExt = 'jpg';
     if (imageUrl) {
-      bestUrl = imageUrl;
-      // Tentukan ekstensi dari URL
-      let imgExt = entry.ext || 'jpg';
       if (imageUrl.includes('.png')) imgExt = 'png';
       else if (imageUrl.includes('.webp')) imgExt = 'webp';
       else if (imageUrl.includes('.jpg') || imageUrl.includes('.jpeg')) imgExt = 'jpg';
+      else imgExt = entry.ext === 'jpg' || entry.ext === 'png' ? entry.ext : 'jpg';
+    }
 
+    const finalUrl = imageUrl || bestThumbnail || entry.url || "";
+    const thumb = bestThumbnail || finalUrl;
+
+    const availableFormats = [];
+    if (finalUrl) {
       availableFormats.push({
         type: 'image',
         quality: 'Original',
-        url: imageUrl,
-        ext: imgExt
-      });
-    }
-
-    // Return early untuk foto, tidak perlu proses video formats
-    let thumb = entry.thumbnail || null;
-    if (!thumb && entry.thumbnails && entry.thumbnails.length > 0) {
-      const sorted = [...entry.thumbnails].sort((a, b) => (b.width || 0) - (a.width || 0));
-      thumb = sorted[0].url || sorted[0];
-    }
-    const finalUrl = bestUrl || imageUrl || thumb || "";
-    if (!thumb) thumb = finalUrl;
-
-    // Jika sama sekali kosong, set flag agar bisa di-retry
-    if (availableFormats.length === 0 && finalUrl) {
-      availableFormats.push({
-        type: 'image',
-        quality: 'Default',
         url: finalUrl,
-        ext: entry.ext || 'jpg'
+        ext: imgExt
       });
     }
 
     return {
       type: "image",
       url: finalUrl,
-      thumbnail: thumb || finalUrl,
+      thumbnail: thumb,
       width: entry.width || null,
       height: entry.height || null,
       duration: null,
-      ext: entry.ext || 'jpg',
+      ext: imgExt,
       formats: availableFormats
     };
   }
 
-  // ─── Penanganan VIDEO (kode asli) ───
-  if (isVideo && entry.formats && entry.formats.length > 0) {
-    // Format dengan video codec terbaik yang JUGA memiliki audio dan BUKAN playlist (HLS/DASH)
-    const videoFormats = entry.formats.filter(
-      (f) => f.vcodec !== "none" && f.acodec !== "none" && f.url && f.ext === "mp4" && f.protocol && f.protocol.startsWith('http')
-    );
-    if (videoFormats.length > 0) {
-      // Sort by height descending, ambil yang terbesar
-      videoFormats.sort((a, b) => (b.height || 0) - (a.height || 0));
-      bestUrl = videoFormats[0].url;
+  // ─── Penanganan VIDEO ───
+  let bestUrl = entry.url;
+  const availableFormats = [];
 
-      // Kumpulkan resolusi unik
-      const seenResolutions = new Set();
-      videoFormats.forEach(f => {
+  if (entry.formats && entry.formats.length > 0) {
+    // Helper: cek protocol http(s)
+    const isHttp = (f) => f.protocol && f.protocol.startsWith('http');
+    // Helper: cek vcodec valid (bukan none/null/undefined)
+    const hasVid = (f) => f.vcodec && f.vcodec !== "none" && f.vcodec !== "null";
+    // Helper: cek acodec valid
+    const hasAud = (f) => f.acodec && f.acodec !== "none" && f.acodec !== "null";
+
+    // 1. Format dengan video+audio dalam satu file (muxed) - PRIORITAS UTAMA
+    const muxedFormats = entry.formats.filter(f => hasVid(f) && hasAud(f) && f.url && isHttp(f));
+    if (muxedFormats.length > 0) {
+      muxedFormats.sort((a, b) => (b.height || 0) - (a.height || 0));
+      bestUrl = muxedFormats[0].url;
+      console.log(`[Scraper] ✓ Video dengan audio terpilih: ${muxedFormats[0].format_id || 'unknown'} (${muxedFormats[0].height || '?'}p)`);
+      const seenRes = new Set();
+      muxedFormats.forEach(f => {
         const res = f.height ? `${f.height}p` : 'HD';
-        if (!seenResolutions.has(res)) {
-          seenResolutions.add(res);
-          availableFormats.push({
-            type: 'video',
-            quality: res,
-            url: f.url,
-            ext: f.ext
-          });
+        if (!seenRes.has(res)) {
+          seenRes.add(res);
+          availableFormats.push({ type: 'video', quality: res, url: f.url, ext: f.ext || 'mp4' });
         }
       });
     }
 
-    // Ekstrak audio format jika ada (audio only) dan bukan playlist
-    const audioFormats = entry.formats.filter(
-      (f) => f.vcodec === "none" && f.url && f.protocol && f.protocol.startsWith('http')
-    );
+    // 2. Video-only formats (DASH: perlu merge dengan audio)
+    const videoOnlyFormats = entry.formats.filter(f => hasVid(f) && !hasAud(f) && f.url && isHttp(f));
+    const audioOnlyFormats = entry.formats.filter(f => !hasVid(f) && hasAud(f) && f.url && isHttp(f));
+
     let bestAudioUrl = null;
-    if (audioFormats.length > 0) {
-      // Sort by abr (audio bitrate) descending
-      audioFormats.sort((a, b) => (b.abr || 0) - (a.abr || 0));
-      bestAudioUrl = audioFormats[0].url;
+    if (audioOnlyFormats.length > 0) {
+      audioOnlyFormats.sort((a, b) => (b.abr || 0) - (a.abr || 0));
+      bestAudioUrl = audioOnlyFormats[0].url;
       availableFormats.push({
-        type: 'audio',
-        quality: 'Audio',
-        url: audioFormats[0].url,
-        ext: audioFormats[0].ext === 'm4a' ? 'm4a' : 'mp3'
+        type: 'audio', quality: 'Audio', url: audioOnlyFormats[0].url,
+        ext: audioOnlyFormats[0].ext === 'm4a' ? 'm4a' : 'mp3'
       });
     }
 
-    // ─── Format Video-Only 1080p+ (needsMerge) ───
-    if (bestAudioUrl) {
-      const videoOnlyFormats = entry.formats.filter(
-        (f) => f.vcodec !== "none" && f.acodec === "none" && f.url &&
-               f.protocol && f.protocol.startsWith('http') &&
-               (f.height || 0) >= 1080
-      );
-      const seenMergeRes = new Set();
-      const existingRes = new Set(availableFormats.filter(f => f.type === 'video').map(f => f.quality));
+    // Jika ada video-only formats, tambahkan dengan flag needsMerge
+    if (videoOnlyFormats.length > 0) {
       videoOnlyFormats.sort((a, b) => (b.height || 0) - (a.height || 0));
+      const seenRes = new Set(availableFormats.filter(f => f.type === 'video').map(f => f.quality));
       videoOnlyFormats.forEach(f => {
         const res = f.height ? `${f.height}p` : 'HD';
-        if (!seenMergeRes.has(res) && !existingRes.has(res)) {
-          seenMergeRes.add(res);
+        if (!seenRes.has(res)) {
+          seenRes.add(res);
           availableFormats.push({
-            type: 'video',
-            quality: `${res} HD`,
-            url: f.url,
-            ext: 'mp4',
-            needsMerge: true,
-            audioUrl: bestAudioUrl
+            type: 'video', quality: res, url: f.url, ext: f.ext || 'mp4',
+            needsMerge: bestAudioUrl ? true : false,
+            audioUrl: bestAudioUrl || null
           });
         }
       });
+
+      // PERBAIKAN: Jika TIDAK ADA format muxed (video tanpa audio), WAJIB gunakan merge
+      if (muxedFormats.length === 0 && videoOnlyFormats.length > 0) {
+        if (bestAudioUrl) {
+          // Ada audio track terpisah, gunakan video tertinggi + merge flag
+          bestUrl = videoOnlyFormats[0].url;
+          console.log(`[Scraper] ⚠️ Video TANPA audio! Akan di-merge: video=${videoOnlyFormats[0].format_id || 'unknown'} + audio=${audioOnlyFormats[0].format_id || 'unknown'}`);
+        } else {
+          // Tidak ada audio sama sekali - video memang silent
+          bestUrl = videoOnlyFormats[0].url;
+          console.log(`[Scraper] ℹ️ Video silent (tanpa audio track)`);
+        }
+      }
+    }
+
+    // 3. Fallback: format apapun yang punya URL (JANGAN GUNAKAN INI untuk video normal)
+    if (!bestUrl) {
+      const anyWithUrl = entry.formats.filter(f => f.url && isHttp(f));
+      if (anyWithUrl.length > 0) {
+        anyWithUrl.sort((a, b) => (b.height || b.width || 0) - (a.height || a.width || 0));
+        bestUrl = anyWithUrl[0].url;
+        console.log(`[Scraper] ⚠️ Fallback ke format apapun: ${anyWithUrl[0].format_id || 'unknown'}`);
+        if (availableFormats.length === 0) {
+          availableFormats.push({
+            type: 'video', quality: 'Default', url: bestUrl, ext: anyWithUrl[0].ext || 'mp4'
+          });
+        }
+      }
     }
   }
 
   // Jika tidak ada format yang tersaring tapi ada URL, jadikan default
   if (availableFormats.length === 0 && entry.url) {
     availableFormats.push({
-      type: 'video',
-      quality: 'Default',
-      url: entry.url,
-      ext: entry.ext || "mp4"
+      type: 'video', quality: 'Default', url: entry.url, ext: entry.ext || "mp4"
     });
   }
 
   // Fallback tambahan: jika video, dan yt-dlp tidak memberi audio-only track,
   // beri pseudo-audio option (menggunakan URL video utama)
-  if (isVideo && !availableFormats.some(f => f.type === 'audio')) {
+  if (!availableFormats.some(f => f.type === 'audio')) {
     availableFormats.push({
-      type: 'audio',
-      quality: 'Audio',
-      url: bestUrl || entry.url,
-      ext: 'mp3'
+      type: 'audio', quality: 'Audio', url: bestUrl || entry.url, ext: 'mp3'
     });
   }
 
@@ -538,15 +593,52 @@ function extractMediaItem(entry) {
   }
   if (!thumb) thumb = finalUrl;
 
+  // Deteksi jika format default perlu merge audio
+  let needsMerge = false;
+  let audioUrl = null;
+  let mergedDuration = entry.duration || null;
+  
+  // Cek apakah URL utama adalah video-only yang perlu audio
+  if (entry.formats && entry.formats.length > 0) {
+    const mainFormat = entry.formats.find(f => f.url === finalUrl);
+    if (mainFormat) {
+      const hasVid = mainFormat.vcodec && mainFormat.vcodec !== "none" && mainFormat.vcodec !== "null";
+      const hasAud = mainFormat.acodec && mainFormat.acodec !== "none" && mainFormat.acodec !== "null";
+      
+      if (hasVid && !hasAud) {
+        // Video tanpa audio, cari audio track
+        const audioFormat = availableFormats.find(f => f.type === 'audio');
+        if (audioFormat) {
+          needsMerge = true;
+          audioUrl = audioFormat.url;
+          
+          // Ambil duration dari video track atau audio track (bukan entry.duration)
+          if (!mergedDuration) {
+            mergedDuration = mainFormat.duration || audioFormat.duration || null;
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback duration: cari dari format yang tersedia
+  if (!mergedDuration && availableFormats.length > 0) {
+    for (const f of availableFormats) {
+      if (f.duration) { mergedDuration = f.duration; break; }
+    }
+  }
+
   return {
     type: "video",
     url: finalUrl || "",
     thumbnail: thumb,
     width: entry.width || null,
     height: entry.height || null,
-    duration: entry.duration || null,
+    duration: mergedDuration,
     ext: entry.ext || "mp4",
-    formats: availableFormats
+    formats: availableFormats,
+    needsMerge: needsMerge,
+    audioUrl: audioUrl
   };
 }
 
@@ -853,35 +945,47 @@ async function scrapeInstagramViaSnapInst(url) {
   }
 }
 
-// ─── SSSSave API (ssssave.net) ─────────────────────────────────────────────────
+// ─── SSSSave API (ssssave.app) ─────────────────────────────────────────────────
 // API populer, support carousel Instagram (foto slide)
 
 async function scrapeInstagramViaSSSSave(url) {
   console.log("[Scraper] Mencoba SSSSave untuk Instagram...");
   
-  try {
-    const resp = await axios.post(
-      "https://ssssave.net/api/ajaxSearch",
-      new URLSearchParams({ q: url, t: "media", lang: "en" }).toString(),
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "Origin": "https://ssssave.net",
-          "Referer": "https://ssssave.net/",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        timeout: 15000
-      }
-    );
-    
-    const data = resp.data;
-    if (!data || data.status !== "ok" || !data.data) {
-      throw new Error("SSSSave tidak mengembalikan hasil");
+  // Coba beberapa domain SSSSave (domain lama sering mati)
+  const domains = ["https://ssssave.app", "https://ssssave.com", "https://ssssave.net"];
+  let resp = null;
+  
+  for (const domain of domains) {
+    try {
+      resp = await axios.post(
+        `${domain}/api/ajaxSearch`,
+        new URLSearchParams({ q: url, t: "media", lang: "en" }).toString(),
+        {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": domain,
+            "Referer": `${domain}/`,
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          timeout: 12000
+        }
+      );
+      if (resp.data && resp.data.status === "ok" && resp.data.data) break;
+      resp = null;
+    } catch (e) {
+      resp = null;
+      // Lanjut coba domain berikutnya
     }
-    
+  }
+  
+  if (!resp || !resp.data || resp.data.status !== "ok" || !resp.data.data) {
+    throw new Error("SSSSave tidak mengembalikan hasil (semua domain gagal)");
+  }
+  
+  try {
     const shortcode = extractShortcode(url) || "ssssave";
-    const htmlData = data.data;
+    const htmlData = resp.data.data;
     const mediaItems = [];
     const seenUrls = new Set();
 
@@ -1018,6 +1122,147 @@ async function scrapeInstagramViaIgram(url) {
     };
   } catch (err) {
     throw new Error(`igram gagal: ${err.message}`);
+  }
+}
+
+async function scrapeInstagramViaIgramPlaywright(url) {
+  console.log("[Scraper] Mencoba igram.world via Playwright...");
+  const { chromium } = require('playwright');
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    });
+    const page = await context.newPage();
+    
+    // Block heavy resources for speed
+    await page.route('**/*.{woff,woff2,ttf,css}', route => route.abort());
+
+    let targetUrl = url;
+    const storyMatch = url.match(/stories\/([a-zA-Z0-9_.-]+)/);
+    if (storyMatch && storyMatch[1]) {
+      // Ubah link spesifik menjadi link profil story agar igram mendownload SEMUA story
+      targetUrl = `https://www.instagram.com/stories/${storyMatch[1]}/`;
+      await page.goto('https://igram.world/story-saver', { timeout: 30000 });
+    } else {
+      await page.goto('https://igram.world/', { timeout: 30000 });
+    }
+    
+    // Fill the input
+    await page.fill('input[id="search-form-input"]', targetUrl);
+    
+    // Click submit
+    await page.click('button.search-form__button');
+    
+    // wait for result container or error
+    await page.waitForSelector('.output-list__item, .alert-danger', { timeout: 30000 });
+    
+    // check for error
+    const errorMsg = await page.$('.alert-danger');
+    if (errorMsg) {
+       throw new Error("igram.world menampilkan pesan error untuk URL tersebut");
+    }
+
+    // Scroll down dan tunggu semua item story ter-load (lazy loading)
+    let prevCount = 0;
+    let stableRounds = 0;
+    for (let i = 0; i < 10; i++) {
+      // Scroll ke bawah untuk trigger lazy loading
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(1500);
+      
+      const currentCount = await page.$$eval('.output-list__item', els => els.length);
+      console.log(`[igram] Scroll round ${i + 1}: found ${currentCount} items`);
+      
+      if (currentCount === prevCount) {
+        stableRounds++;
+        if (stableRounds >= 2) break; // Stabil selama 2 round = selesai loading
+      } else {
+        stableRounds = 0;
+      }
+      prevCount = currentCount;
+    }
+
+    // Extract timestamp (e.g., "7 hours ago")
+    const timestampText = await page.$eval('.output-list__info-time', el => el.innerText.trim()).catch(() => null);
+
+
+    // get all download links and thumbnail URLs
+    const rawItems = await page.$$eval('.output-list__item', els => els.map(el => {
+      const img = el.querySelector('img');
+      const a = el.querySelector('a[download]');
+      return {
+        url: a ? a.href : null,
+        thumbnailUrl: img ? img.src : null
+      };
+    }).filter(i => i.url));
+    
+    if (rawItems.length === 0) {
+      throw new Error("Tidak ada link download yang ditemukan via Playwright");
+    }
+
+    // Fetch each thumbnail as base64 inside the page context (bypasses CORS)
+    const items = await page.evaluate(async (rawItems) => {
+      const results = [];
+      for (const item of rawItems) {
+        let thumbnailBase64 = null;
+        if (item.thumbnailUrl) {
+          try {
+            const resp = await fetch(item.thumbnailUrl);
+            const blob = await resp.blob();
+            thumbnailBase64 = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result);
+              reader.readAsDataURL(blob);
+            });
+          } catch (e) {
+            // fallback: keep URL
+            thumbnailBase64 = item.thumbnailUrl;
+          }
+        }
+        results.push({ url: item.url, thumbnail: thumbnailBase64 });
+      }
+      return results;
+    }, rawItems);
+
+    const shortcode = extractShortcode(url) || "igram_pw";
+    
+    let author = "Instagram User";
+    if (storyMatch && storyMatch[1]) {
+      author = storyMatch[1];
+    }
+
+    const mediaItems = items.map((item, i) => {
+      const isVideo = item.url.includes('.mp4');
+      return {
+        type: isVideo ? "video" : "image",
+        url: item.url,
+        thumbnail: item.thumbnail || item.url,
+        width: null, height: null, duration: null,
+        ext: isVideo ? 'mp4' : 'jpg',
+        formats: [{ type: isVideo ? "video" : "image", quality: `HD ${i+1}`, url: item.url, ext: isVideo ? 'mp4' : 'jpg' }]
+      };
+    });
+
+    return {
+      platform: "instagram",
+      type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+      shortcode,
+      author,
+      caption: "",
+      title: "",
+      timestamp: timestampText,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: "igram_pw",
+      warning: null
+    };
+
+  } catch (err) {
+    throw new Error(`igram Playwright gagal: ${err.message}`);
+  } finally {
+    if (browser) await browser.close();
   }
 }
 
@@ -1356,22 +1601,78 @@ async function scrapeInstagramViaEmbed(url) {
       caption = captionMatch[1].replace(/\\n/g, "\n");
     }
 
-    // Ambil SEMUA display_url — carousel bisa punya banyak foto
-    const imgRegex = /"display_url":"([^"]+)"/g;
+    // ── CAROUSEL DETECTION: Parse JSON data dari embed page ──
+    // Instagram embed page mengandung JSON dengan data carousel (edge_sidecar_to_children)
     const photoUrls = [];
+    const videoUrls = [];
     const seen = new Set();
-    let m;
-    while ((m = imgRegex.exec(html)) !== null) {
-      const photoUrl = m[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
-      if (!seen.has(photoUrl)) { seen.add(photoUrl); photoUrls.push(photoUrl); }
+
+    // Method 1: Cari edge_sidecar_to_children di JSON embed (carousel!)
+    const sidecarPatterns = [
+      /"edge_sidecar_to_children"\s*:\s*\{\s*"edges"\s*:\s*(\[[\s\S]*?\])\s*\}/,
+      /"sidecar"\s*:\s*(\[[\s\S]*?\])/,
+      /"carousel_media"\s*:\s*(\[[\s\S]*?\])/,
+    ];
+    
+    for (const pattern of sidecarPatterns) {
+      const sidecarMatch = html.match(pattern);
+      if (sidecarMatch) {
+        try {
+          const sidecarData = JSON.parse(sidecarMatch[1].replace(/\\u0026/g, "&").replace(/\\\//g, "/"));
+          for (const item of sidecarData) {
+            const node = item.node || item;
+            // Video di carousel
+            if (node.video_url) {
+              const vUrl = node.video_url.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+              if (!seen.has(vUrl)) { seen.add(vUrl); videoUrls.push(vUrl); }
+            }
+            // Foto di carousel — ambil resolusi tertinggi
+            if (node.display_resources?.length > 0) {
+              const best = node.display_resources[node.display_resources.length - 1];
+              const imgUrl = (best.src || best.url || "").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+              if (imgUrl && !seen.has(imgUrl)) { seen.add(imgUrl); photoUrls.push(imgUrl); }
+            } else if (node.display_url) {
+              const imgUrl = node.display_url.replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+              if (!seen.has(imgUrl)) { seen.add(imgUrl); photoUrls.push(imgUrl); }
+            }
+          }
+          if (photoUrls.length > 1 || videoUrls.length > 0) {
+            console.log(`[Scraper] Embed carousel JSON: ${photoUrls.length} foto, ${videoUrls.length} video`);
+            break; // Carousel ditemukan!
+          }
+        } catch (e) {
+          // JSON parse gagal, lanjut ke pattern berikutnya
+        }
+      }
     }
 
-    // Cek video (reel)
-    const videoRegex = /"video_url":"([^"]+)"/g;
-    const videoUrls = [];
-    while ((m = videoRegex.exec(html)) !== null) {
-      const vUrl = m[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
-      if (!videoUrls.includes(vUrl)) videoUrls.push(vUrl);
+    // Method 2: Kalau carousel JSON tidak ketemu, fallback ke regex display_url
+    if (photoUrls.length <= 1 && videoUrls.length === 0) {
+      photoUrls.length = 0; // Reset
+      const imgRegex = /"display_url":"([^"]+)"/g;
+      let m;
+      while ((m = imgRegex.exec(html)) !== null) {
+        const photoUrl = m[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
+        if (!seen.has(photoUrl)) { seen.add(photoUrl); photoUrls.push(photoUrl); }
+      }
+
+      const videoRegex = /"video_url":"([^"]+)"/g;
+      while ((m = videoRegex.exec(html)) !== null) {
+        const vUrl = m[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
+        if (!videoUrls.includes(vUrl)) videoUrls.push(vUrl);
+      }
+    }
+
+    // Method 3: Cari URL gambar dari tag <img> dengan src CDN Instagram
+    if (photoUrls.length === 0 && videoUrls.length === 0) {
+      const imgTagRegex = /<img[^>]+src="(https?:\/\/[^"]*cdninstagram\.com[^"]+)"/gi;
+      let m;
+      while ((m = imgTagRegex.exec(html)) !== null) {
+        const imgUrl = m[1].replace(/&amp;/g, "&");
+        // Skip thumbnail kecil dan foto profil
+        if (/s150x150|s320x320|s44x44|s64x64|profile_pic/.test(imgUrl)) continue;
+        if (!seen.has(imgUrl)) { seen.add(imgUrl); photoUrls.push(imgUrl); }
+      }
     }
 
     if (photoUrls.length === 0 && videoUrls.length === 0) {
@@ -1544,8 +1845,10 @@ async function scrapeInstagramViaInstaloader(url) {
   console.log("[Scraper] Mencoba Instaloader (Python) untuk Instagram...");
   
   return new Promise((resolve, reject) => {
-    // Check if Python and instaloader available
-    exec('python --version', (err) => {
+    // Check if Python and instaloader available (try python3 first for Debian/Railway)
+    exec('python3 --version', (err3) => {
+      const pythonCmd = err3 ? 'python' : 'python3';
+      exec(`${pythonCmd} --version`, (err) => {
       if (err) {
         return reject(new Error("Python tidak ditemukan. Install Python untuk menggunakan Instaloader."));
       }
@@ -1556,66 +1859,105 @@ async function scrapeInstagramViaInstaloader(url) {
         return reject(new Error("Shortcode tidak ditemukan"));
       }
       
-      // Create unique temp dir
+      // Create unique temp dir with profile subfolder for username extraction
       const tempDirName = `temp_ig_${Date.now()}`;
       
-      // Command to download single post without login
-      // Use -- shortcode syntax instead of :shortcode
-      const cmd = `python -m instaloader --no-videos --no-captions --no-metadata-json --dirname-pattern=${tempDirName} -- -${shortcode}`;
+      // Download ALL media (foto + video) tanpa login — support carousel!
+      // {profile} creates subfolder with username (e.g. temp_ig_xxx/fabrizioromano/)
+      const cmd = `${pythonCmd} -m instaloader --no-captions --no-metadata-json --dirname-pattern=${tempDirName}/{profile} -- -${shortcode}`;
       
-      exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+      exec(cmd, { timeout: 60000 }, (error, stdout, stderr) => {
         const fs = require('fs');
         const path = require('path');
         
         // Check if temp dir exists even if there's an error (403 is common but download still works)
-        const tempDir = path.join(__dirname, tempDirName);
+        const tempBaseDir = path.join(__dirname, tempDirName);
         
-        if (!fs.existsSync(tempDir)) {
+        if (!fs.existsSync(tempBaseDir)) {
           console.warn(`[Scraper] Instaloader error: ${stderr || error?.message || 'Unknown'}`);
           return reject(new Error(`Instaloader gagal: folder tidak dibuat`));
         }
         
         try {
+          // Find profile subfolder (contains the username)
+          const subdirs = fs.readdirSync(tempBaseDir).filter(f => 
+            fs.statSync(path.join(tempBaseDir, f)).isDirectory()
+          );
+          const profileName = subdirs.length > 0 ? subdirs[0] : null;
+          const tempDir = profileName ? path.join(tempBaseDir, profileName) : tempBaseDir;
+          
           const files = fs.readdirSync(tempDir);
-          const imageFile = files.find(f => f.endsWith('.jpg') || f.endsWith('.png') || f.endsWith('.jpeg'));
           
-          if (!imageFile) {
-            // Clean up
-            fs.rmSync(tempDir, { recursive: true, force: true });
-            return reject(new Error("Foto tidak ditemukan dari Instaloader"));
+          // Ambil SEMUA file media (foto + video) — carousel support!
+          const mediaFiles = files.filter(f => 
+            f.endsWith('.jpg') || f.endsWith('.png') || f.endsWith('.jpeg') || f.endsWith('.mp4') || f.endsWith('.webp')
+          ).sort(); // Sort agar urutan sesuai carousel
+          
+          if (mediaFiles.length === 0) {
+            fs.rmSync(tempBaseDir, { recursive: true, force: true });
+            return reject(new Error("Media tidak ditemukan dari Instaloader"));
           }
           
-          const imagePath = path.join(tempDir, imageFile);
-          
-          // Check if file exists and has content
-          const stats = fs.statSync(imagePath);
-          if (stats.size === 0) {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-            return reject(new Error("File foto kosong"));
+          // Simpan file ke temp_downloads agar bisa diakses via HTTP URL
+          const tempDownloadsDir = path.join(__dirname, 'temp_downloads');
+          if (!fs.existsSync(tempDownloadsDir)) fs.mkdirSync(tempDownloadsDir, { recursive: true });
+          const batchId = `ig_${Date.now()}`;
+          const batchDir = path.join(tempDownloadsDir, batchId);
+          fs.mkdirSync(batchDir, { recursive: true });
+
+          const mediaItems = [];
+          for (const file of mediaFiles) {
+            const filePath = path.join(tempDir, file);
+            const stats = fs.statSync(filePath);
+            if (stats.size === 0) continue;
+            
+            const isVideo = file.endsWith('.mp4');
+            const ext = isVideo ? 'mp4' : (file.endsWith('.webp') ? 'webp' : 'jpg');
+            const mimeType = isVideo ? 'video/mp4' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+            
+            // Copy file ke temp_downloads dan gunakan HTTP URL
+            const destFile = path.join(batchDir, file);
+            fs.copyFileSync(filePath, destFile);
+            const httpUrl = `/temp/${batchId}/${encodeURIComponent(file)}`;
+            
+            console.log(`[Scraper] Instaloader: ${file} (${(stats.size / 1024).toFixed(0)}KB) → ${httpUrl}`);
+            
+            mediaItems.push({
+              type: isVideo ? "video" : "image",
+              url: httpUrl,
+              thumbnail: httpUrl,
+              width: null,
+              height: null,
+              duration: null,
+              ext: ext,
+              formats: [{
+                type: isVideo ? "video" : "image",
+                quality: isVideo ? "HD" : `HD Foto ${mediaItems.length + 1}`,
+                url: httpUrl,
+                ext: ext
+              }]
+            });
           }
           
-          console.log(`[Scraper] File downloaded: ${imageFile} (${stats.size} bytes)`);
+          // Clean up temp directory Instaloader
+          fs.rmSync(tempBaseDir, { recursive: true, force: true });
           
-          // Read as buffer then convert to base64
-          const imageBuffer = fs.readFileSync(imagePath);
-          const imageBase64 = imageBuffer.toString('base64');
-          const imageUrl = `data:image/jpeg;base64,${imageBase64}`;
+          // Auto-cleanup batch dir setelah 1 jam
+          setTimeout(() => {
+            try { fs.rmSync(batchDir, { recursive: true, force: true }); } catch (_) {}
+          }, 3600000).unref();
           
-          // Extract username from URL or use shortcode
-          let username = "Instagram User";
-          const urlMatch = url.match(/instagram\.com\/([^/]+)\//);
-          if (urlMatch && urlMatch[1] !== 'p' && urlMatch[1] !== 'reel') {
-            username = urlMatch[1];
+          if (mediaItems.length === 0) {
+            return reject(new Error("Semua file media kosong dari Instaloader"));
           }
           
-          // Clean up temp directory
-          fs.rmSync(tempDir, { recursive: true, force: true });
+          console.log(`[Scraper] ✅ Instaloader: ${mediaItems.length} media, profile: ${profileName || 'unknown'}`);
           
           resolve({
             platform: "instagram",
-            type: "image",
+            type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
             shortcode: shortcode,
-            author: username,
+            author: profileName || "Instagram User",
             caption: "",
             title: "",
             timestamp: null,
@@ -1623,32 +1965,18 @@ async function scrapeInstagramViaInstaloader(url) {
             commentCount: 0,
             viewCount: 0,
             duration: null,
-            mediaItems: [{
-              type: "image",
-              url: imageUrl,
-              thumbnail: imageUrl,
-              width: null,
-              height: null,
-              duration: null,
-              ext: 'jpg',
-              formats: [{
-                type: "image",
-                quality: "Original",
-                url: imageUrl,
-                ext: 'jpg'
-              }]
-            }],
+            mediaItems: mediaItems,
             source: "instaloader",
-            warning: "Foto berhasil didownload via Instaloader"
+            warning: null
           });
         } catch (fsErr) {
-          // Clean up on error
           try {
-            fs.rmSync(tempDir, { recursive: true, force: true });
+            fs.rmSync(tempBaseDir, { recursive: true, force: true });
           } catch (e) {}
           reject(new Error(`File system error: ${fsErr.message}`));
         }
       });
+      });  // closes pythonCmd exec
     });
   });
 }
@@ -3830,29 +4158,32 @@ async function scrapeYouTubeViaYtdlCore(url) {
 
 /**
  * YouTube via yt-dlp dengan opsi khusus untuk bypass bot detection.
- * Lebih agresif daripada scrapeViaYtDlp standar — khusus YouTube.
+ * MODE: Metadata-only — hanya jalankan --dump-single-json, TIDAK download file.
+ * Format dikembalikan sebagai URL /api/yt-download?videoId=XXX&formatId=YYY
+ * agar streaming langsung dari server ke browser tanpa menyimpan file di disk.
  */
 async function scrapeYouTubeViaYtDlpDirect(url) {
-  console.log("[YouTube] Mencoba yt-dlp (mode YouTube direct)...");
+  console.log("[YouTube] Mencoba yt-dlp (mode metadata-only + streaming)...");
 
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
 
   const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Opsi yt-dlp khusus YouTube: format terbaik yang bisa langsung diplay
-  const args = [
+  // Ambil metadata lengkap — gunakan player_client yang bypass bot detection
+  const infoArgs = [
     "--dump-single-json",
     "--no-warnings",
     "--no-playlist",
-    "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
-    "--merge-output-format", "mp4",
-    "--extractor-args", "youtube:player_client=android,web",
+    "--extractor-args", "youtube:player_client=tv_embedded;player_skip=webpage",
     "--no-check-certificates",
+    "--extractor-retries", "3",
+    "--sleep-interval", "2",
+    "--max-sleep-interval", "5",
     cleanUrl
   ];
 
-  const raw = await runCommand("yt-dlp", args, 90000);
+  const raw = await runCommand("yt-dlp", infoArgs, 90000);
   const info = JSON.parse(raw);
 
   const title = info.title || "YouTube Video";
@@ -3860,33 +4191,95 @@ async function scrapeYouTubeViaYtDlpDirect(url) {
   const thumbnail = info.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
   const duration = info.duration || null;
 
-  // Kumpulkan format dari yt-dlp
+  // Build format list dari info.formats — semua URL pakai /api/yt-download
   const formats = [];
   const seenQ = new Set();
-  if (info.formats && Array.isArray(info.formats)) {
-    const mp4Formats = info.formats.filter(f =>
-      f.url && (f.ext === "mp4" || f.vcodec !== "none") && f.vcodec !== "none"
-    ).sort((a, b) => (b.height || 0) - (a.height || 0));
 
-    for (const f of mp4Formats) {
-      const q = f.height ? `${f.height}p` : (f.format_note || "SD");
+  if (info.formats && Array.isArray(info.formats)) {
+    // Video+audio combined: vcodec != none DAN acodec != none, sort by height desc
+    const combinedFormats = info.formats
+      .filter(f => f.format_id && f.vcodec && f.vcodec !== "none" && f.acodec && f.acodec !== "none")
+      .sort((a, b) => (b.height || 0) - (a.height || 0));
+
+    for (const f of combinedFormats) {
+      const q = f.height ? `${f.height}p` : (f.format_note || f.format_id || "SD");
       if (!seenQ.has(q)) {
         seenQ.add(q);
-        formats.push({ type: "video", quality: q, url: f.url, ext: "mp4" });
+        formats.push({
+          type: "video",
+          quality: q,
+          url: `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=${encodeURIComponent(f.format_id)}`,
+          ext: "mp4",
+          format_id: f.format_id
+        });
       }
+    }
+
+    // Video-only HD (1080p+): vcodec != none DAN acodec == none
+    // Di endpoint akan di-merge dengan audio terbaik via ffmpeg
+    const videoOnlyFormats = info.formats
+      .filter(f => f.format_id && f.vcodec && f.vcodec !== "none" && (!f.acodec || f.acodec === "none") && (f.height || 0) >= 1080)
+      .sort((a, b) => (b.height || 0) - (a.height || 0));
+
+    for (const f of videoOnlyFormats) {
+      const q = f.height ? `${f.height}p` : (f.format_note || f.format_id);
+      if (!seenQ.has(q)) {
+        seenQ.add(q);
+        formats.push({
+          type: "video",
+          quality: q,
+          url: `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=${encodeURIComponent(f.format_id)}`,
+          ext: "mp4",
+          format_id: f.format_id
+        });
+      }
+    }
+
+    // Audio: vcodec == none — pilih m4a atau webm terbaik
+    const audioFormats = info.formats
+      .filter(f => f.format_id && (!f.vcodec || f.vcodec === "none") && f.acodec && f.acodec !== "none")
+      .sort((a, b) => {
+        // Prioritaskan m4a, lalu webm, lalu lainnya; sort by abr/tbr desc
+        const extScore = (f) => f.ext === "m4a" ? 2 : f.ext === "webm" ? 1 : 0;
+        if (extScore(b) !== extScore(a)) return extScore(b) - extScore(a);
+        return ((b.abr || b.tbr || 0) - (a.abr || a.tbr || 0));
+      });
+
+    // Ambil satu audio format terbaik saja
+    if (audioFormats.length > 0) {
+      const bestAudio = audioFormats[0];
+      formats.push({
+        type: "audio",
+        quality: "Audio MP3",
+        url: `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=${encodeURIComponent(bestAudio.format_id)}&asAudio=1`,
+        ext: "mp3",
+        format_id: bestAudio.format_id
+      });
     }
   }
 
-  // Fallback ke URL utama jika tidak ada format
-  const mainUrl = info.url || (formats[0] && formats[0].url);
-  if (!mainUrl) throw new Error("yt-dlp tidak menghasilkan URL yang valid");
-
+  // Jika tidak ada format sama sekali, fallback ke format "best"
   if (formats.length === 0) {
-    formats.push({ type: "video", quality: "Best", url: mainUrl, ext: "mp4" });
+    const mainQuality = info.height ? `${info.height}p` : "720p";
+    formats.push({
+      type: "video",
+      quality: mainQuality,
+      url: `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=bv%2Bba%2Fb`,
+      ext: "mp4"
+    });
+    formats.push({
+      type: "audio",
+      quality: "Audio MP3",
+      url: `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=ba%2Fb&asAudio=1`,
+      ext: "mp3"
+    });
   }
 
-  console.log(`[YouTube] ✅ yt-dlp direct berhasil: ${formats.length} format`);
-  return buildYouTubeResult(videoId, formats[0].url, title, thumbnail, formats[0].quality, "ytdlp-direct", formats, author, duration);
+  const mainUrl = formats[0].url;
+  const mainQuality = info.height ? `${info.height}p` : (formats[0].quality || "720p");
+
+  console.log(`[YouTube] ✅ Metadata berhasil: ${formats.length} format, title="${title}"`);
+  return buildYouTubeResult(videoId, mainUrl, title, thumbnail, mainQuality, "ytdlp-stream", formats, author, duration);
 }
 
 /**
@@ -4062,16 +4455,18 @@ async function scrapeYouTubeViaInvidious(url) {
 
   // Daftar Invidious public instances yang aktif dan support API
   const instances = [
+    "https://vid.puffyan.us",
+    "https://invidious.nerdvpn.de",
     "https://inv.nadeko.net",
     "https://invidious.privacydev.net",
     "https://yt.cdaut.de",
     "https://invidious.fdn.fr",
     "https://iv.datura.network",
     "https://invidious.perennialte.ch",
-    "https://invidious.nerdvpn.de",
     "https://invidious.reallyaweso.me",
     "https://invidious.no-logs.com",
-    "https://vid.puffyan.us",
+    "https://invidious.kavin.rocks",
+    "https://yewtu.be",
   ];
 
   for (const instance of instances) {
@@ -4156,8 +4551,9 @@ async function scrapeYouTubeViaPiped(url) {
     "https://pipedapi.adminforge.de",
     "https://pipedapi.drgns.space",
     "https://piped-api.garudalinux.org",
-    "https://piped.video/api",
     "https://pipedapi.tokhmi.xyz",
+    "https://pipedapi.leptons.xyz",
+    "https://piped-api.privacy.com.de",
   ];
 
   for (const instance of pipedInstances) {
@@ -4250,6 +4646,98 @@ function buildYouTubeResult(videoId, url, title, thumbnail, quality, source, for
 }
 
 /**
+ * YouTube via PyTube (pytubefix) Python script.
+ * Menggunakan script lokal pytube_scraper.py.
+ */
+async function scrapeYouTubeViaPytube(url) {
+  console.log("[YouTube] Mencoba PyTube (pytubefix)...");
+
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
+
+  return new Promise((resolve, reject) => {
+    // Gunakan python3 karena Railway (Docker) menyediakan python3
+    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    const scriptPath = require("path").join(__dirname, "pytube_scraper.py");
+    
+    // Gunakan execFile
+    const { execFile } = require("child_process");
+    execFile(pythonCmd, [scriptPath, url], { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        return reject(new Error(`PyTube error: ${error.message}`));
+      }
+      
+      try {
+        const data = JSON.parse(stdout);
+        if (data.error) {
+          return reject(new Error(`PyTube script error: ${data.error}`));
+        }
+        
+        if (!data.formats || data.formats.length === 0) {
+          return reject(new Error("PyTube: tidak ada format tersedia"));
+        }
+        
+        const thumbnail = data.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+        const title = data.title || "YouTube Video";
+        const author = data.author || "YouTube";
+        const duration = data.duration || null;
+        
+        // formats is an array from the python script: {type, quality, url, ext, hasAudio}
+        const validFormats = data.formats.filter(f => f.url && f.url.length > 10);
+        if (validFormats.length === 0) {
+          return reject(new Error("PyTube: format URL tidak valid"));
+        }
+        
+        // Perbaikan: Ubah URL audio agar diproxy dan di-convert ke MP3 oleh server
+        // Ini menghindari error 403 (IP restriction) dan memastikan file terunduh sebagai MP3
+        for (const f of validFormats) {
+          if (f.type === "audio") {
+            f.url = `/api/extract-audio?url=${encodeURIComponent(f.url)}&filename=${encodeURIComponent('youtube_' + videoId + '.mp3')}`;
+            f.ext = "mp3";
+            f.quality = "Audio MP3";
+          }
+        }
+        
+        // Pisahkan menjadi main video item + formats array
+        const bestVideo = validFormats.find(f => f.type === "video") || validFormats[0];
+        const mainQuality = bestVideo.quality || "SD";
+        const mainExt = bestVideo.ext || "mp4";
+        
+        resolve({
+          platform: "youtube",
+          type: "video",
+          shortcode: videoId,
+          author: author,
+          caption: title,
+          title: title,
+          timestamp: null,
+          likeCount: 0,
+          commentCount: 0,
+          viewCount: 0,
+          duration: duration,
+          mediaItems: [{
+            type: "video",
+            url: bestVideo.url,
+            thumbnail: thumbnail,
+            width: null,
+            height: parseInt(mainQuality) || null,
+            duration: duration,
+            ext: mainExt,
+            formats: validFormats
+          }],
+          source: "pytube",
+          warning: bestVideo.hasAudio === false ? "Video only, no audio" : null
+        });
+        
+      } catch (parseErr) {
+        console.warn("[YouTube] PyTube parse error stdout:", stdout.substring(0, 200));
+        reject(new Error(`PyTube parse error: ${parseErr.message}`));
+      }
+    });
+  });
+}
+
+/**
  * YouTube via Cobalt API v10 (open-source, tidak butuh API key).
  * Cobalt adalah tool download media open-source yang mendukung YouTube.
  * API v10: POST /api dengan Accept: application/json (bukan /api/json lagi)
@@ -4259,19 +4747,19 @@ async function scrapeYouTubeViaCobalt(url) {
 
   // Daftar instansi Cobalt publik — format API v10
   const cobaltInstances = [
+    "https://api.cobalt.tools",
     "https://cobalt.api.lrclib.net",
     "https://cobalt-api.oofe.org",
     "https://co.wuk.sh",
-    "https://cobalt.tools",
   ];
 
   for (const instance of cobaltInstances) {
     try {
-      // Coba API v10 dulu (endpoint /api)
+      // Coba API terbaru dulu (POST / dengan Accept: application/json)
       let response;
       try {
         response = await axios.post(
-          `${instance}/api`,
+          `${instance}/`,
           {
             url: url,
             videoQuality: "720",
@@ -4286,25 +4774,45 @@ async function scrapeYouTubeViaCobalt(url) {
             timeout: 20000,
           }
         );
-      } catch (v10Err) {
-        // Fallback ke endpoint lama /api/json jika v10 tidak tersedia
-        response = await axios.post(
-          `${instance}/api/json`,
-          {
-            url: url,
-            vQuality: "720",
-            filenamePattern: "basic",
-            isAudioOnly: false,
-            disableMetadata: true,
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
+      } catch (latestErr) {
+        // Fallback ke API v10 (POST /api)
+        try {
+          response = await axios.post(
+            `${instance}/api`,
+            {
+              url: url,
+              videoQuality: "720",
+              filenameStyle: "basic",
+              downloadMode: "auto",
             },
-            timeout: 20000,
-          }
-        );
+            {
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              timeout: 20000,
+            }
+          );
+        } catch (v10Err) {
+          // Fallback ke endpoint lama /api/json
+          response = await axios.post(
+            `${instance}/api/json`,
+            {
+              url: url,
+              vQuality: "720",
+              filenamePattern: "basic",
+              isAudioOnly: false,
+              disableMetadata: true,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              timeout: 20000,
+            }
+          );
+        }
       }
 
       const data = response.data;
@@ -4877,6 +5385,16 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     }
   }
 
+  // Method 2.5: PyTube (pytubefix)
+  try {
+    const result = await scrapeYouTubeViaPytube(url);
+    console.log("[YouTube] ✅ Berhasil via PyTube");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] PyTube gagal: ${err.message}`);
+    errors.push(`PyTube: ${err.message}`);
+  }
+
   // Method 3: Cobalt API v10 (open-source, public instances, tidak butuh key)
   try {
     const result = await scrapeYouTubeViaCobalt(url);
@@ -5139,6 +5657,83 @@ async function scrapePhotoViaPage(url) {
   };
 }
 
+// ─── Helper: Gabungkan hasil story dari beberapa API (Collect & Merge) ───────
+/**
+ * Menggabungkan hasil story dari beberapa API, dengan deduplikasi berbasis URL.
+ * Ini memungkinkan mengatasi batas 6 story dari API gratis,
+ * karena setiap API mungkin mengembalikan story yang berbeda.
+ *
+ * @param {Array} results - Array dari objek hasil scraper (masing-masing punya .mediaItems)
+ * @param {string} author - Username/author dari story
+ * @returns {object|null} - Objek hasil gabungan, atau null jika kosong
+ */
+function mergeStoryResults(results, author) {
+  if (!results || results.length === 0) return null;
+
+  const seen = new Set();
+  const allMediaItems = [];
+
+  for (const result of results) {
+    if (!result || !result.mediaItems) continue;
+    for (const item of result.mediaItems) {
+      if (!item.url) continue;
+
+      // Buat fingerprint untuk deduplikasi.
+      // CDN Instagram: pathname sudah unik (misal /v/t51.29350-15/HASH_UNIK.jpg)
+      // URL proxy (igram.world, dll): pathname sering generik (/api/download), jadi pakai full URL
+      let fingerprint;
+      try {
+        const parsed = new URL(item.url);
+        const pathParts = parsed.pathname.split('/').filter(Boolean);
+        const lastSegment = pathParts[pathParts.length - 1] || '';
+
+        // Jika segment terakhir cukup panjang (hash CDN Instagram), gunakan itu
+        // Contoh: "449912345_789abc_n.jpg" dari scontent-xxx.cdninstagram.com
+        if (lastSegment.length > 10) {
+          fingerprint = lastSegment;
+        } else {
+          // Segment pendek = URL proxy/generik, gunakan full URL agar tidak kolaps
+          fingerprint = item.url;
+        }
+      } catch {
+        // Fallback: gunakan full URL
+        fingerprint = item.url;
+      }
+
+      if (!seen.has(fingerprint)) {
+        seen.add(fingerprint);
+        allMediaItems.push(item);
+      }
+    }
+  }
+
+  if (allMediaItems.length === 0) return null;
+
+  // Gunakan metadata dari hasil pertama yang berhasil
+  const firstResult = results.find(r => r && r.mediaItems && r.mediaItems.length > 0) || results[0];
+  const sources = results
+    .filter(r => r && r.source)
+    .map(r => r.source)
+    .filter((v, i, a) => a.indexOf(v) === i); // unique sources
+
+  return {
+    platform: "instagram",
+    type: allMediaItems.length > 1 ? "playlist" : allMediaItems[0].type,
+    shortcode: firstResult.shortcode || "story_merged",
+    author: author || firstResult.author || "Instagram User",
+    caption: firstResult.caption || "",
+    title: firstResult.title || "",
+    timestamp: firstResult.timestamp || null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: null,
+    mediaItems: allMediaItems,
+    source: `merged(${sources.join('+')})`,
+    warning: null
+  };
+}
+
 // ─── Fungsi utama (multi-platform) ──────────────────────────────────────────
 
 /**
@@ -5148,7 +5743,559 @@ async function scrapePhotoViaPage(url) {
  * @param {string} url - URL media
  * @returns {Promise<object>} Data media
  */
+// ─── Instagram Story via Instagram API (GraphQL/Private API) ──────────────────
+// Menggunakan cookies untuk mengakses Instagram API langsung.
+// Mendapatkan SEMUA story items termasuk FOTO yang tidak muncul di yt-dlp.
+
+async function scrapeInstagramStoryViaAPI(url) {
+  const usernameMatch = url.match(/instagram\.com\/stories\/([^/]+)/i);
+  if (!usernameMatch || !usernameMatch[1]) throw new Error("Username tidak ditemukan dari URL story");
+  const username = usernameMatch[1];
+  console.log(`[IG-API] Mencoba Instagram API untuk @${username}...`);
+
+  const fs = require('fs');
+
+  // Parse cookies — dari file (lokal) atau env var (Railway)
+  let cookiesContent = null;
+  const cookiesFile = getRandomCookieFile();
+  if (cookiesFile) {
+    cookiesContent = fs.readFileSync(cookiesFile, 'utf-8');
+  } else if (process.env.IG_COOKIE_BASE64) {
+    cookiesContent = Buffer.from(process.env.IG_COOKIE_BASE64, 'base64').toString('utf-8');
+    console.log('[IG-API] Menggunakan cookies dari env var IG_COOKIE_BASE64');
+  } else {
+    throw new Error("Cookies tidak ditemukan (file atau env var IG_COOKIE_BASE64)");
+  }
+
+  const cookies = {};
+  const trimmed = cookiesContent.trim();
+
+  // Format 1: Netscape (tab-separated)
+  let parsedOk = false;
+  trimmed.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line || line.startsWith('#')) return;
+    const parts = line.split('\t');
+    if (parts.length >= 7 && parts[0] && parts[0].includes('instagram.com') && parts[5] && parts[6]) {
+      try { cookies[parts[5]] = decodeURIComponent(parts[6]); } catch (_) { cookies[parts[5]] = parts[6]; }
+      parsedOk = true;
+    }
+  });
+
+  // Format 2: JSON (cookies array) — fallback jika Netscape gagal
+  if (!parsedOk && (trimmed.startsWith('[') || trimmed.startsWith('{'))) {
+    try {
+      const jsonCookies = JSON.parse(trimmed);
+      const arr = Array.isArray(jsonCookies) ? jsonCookies : [jsonCookies];
+      for (const c of arr) {
+        if (c.name && c.value && c.domain && c.domain.includes('instagram.com')) {
+          cookies[c.name] = c.value;
+        }
+      }
+      if (Object.keys(cookies).length > 0) {
+        parsedOk = true;
+        console.log('[IG-API] Cookies parsed dari format JSON');
+      }
+    } catch (_) {}
+  }
+
+  // Format 3: Query string (name=value; name=value) — fallback terakhir
+  if (!parsedOk && trimmed.includes('sessionid=')) {
+    const parts = trimmed.split(/[;&]/);
+    for (const p of parts) {
+      const eq = p.indexOf('=');
+      if (eq > 0) {
+        const name = p.substring(0, eq).trim();
+        const value = p.substring(eq + 1).trim();
+        if (name && value) cookies[name] = decodeURIComponent(value);
+      }
+    }
+    if (cookies.sessionid) {
+      parsedOk = true;
+      console.log('[IG-API] Cookies parsed dari format query string');
+    }
+  }
+
+  const sessionId = cookies.sessionid || process.env.IG_SESSIONID;
+  const dsUserId = cookies.ds_user_id || process.env.IG_DS_USER_ID;
+  const csrfToken = cookies.csrftoken || process.env.IG_CSRFTOKEN;
+  const igDid = cookies.ig_did || process.env.IG_DID;
+
+  if (!sessionId) {
+    console.error('[IG-API] Gagal parse cookies. Isi cookie (200 chars):', cookiesContent.substring(0, 200));
+    throw new Error("sessionid tidak ada di cookies file");
+  }
+
+  const cookieStr = `sessionid=${encodeURIComponent(sessionId)}; ds_user_id=${dsUserId || ''}; csrftoken=${csrfToken || ''}; ig_did=${igDid || ''}`;
+
+  // Headers — gunakan desktop UA agar cocok dengan cookies dari browser
+  const desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  const headers = {
+    'User-Agent': desktopUA,
+    'X-IG-App-ID': '936619743392459',
+    'X-ASBD-ID': '129477',
+    'X-IG-WWW-Claim': '0',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Cookie': cookieStr,
+    'Accept': '*/*',
+    'Referer': `https://www.instagram.com/stories/${username}/`,
+  };
+
+  // Step 1: Get user ID — try URL params first, then API fallback
+  let userId = null;
+
+  // Method A: Extract from URL query params (reel_owner_id=xxx or reel_id=xxx)
+  try {
+    const urlObj = new URL(url);
+    let maybeId = urlObj.searchParams.get('reel_owner_id') || urlObj.searchParams.get('reel_id');
+    if (maybeId && /^\d+$/.test(maybeId)) {
+      userId = maybeId;
+      console.log(`[IG-API] User ID dari URL param: ${userId}`);
+    }
+  } catch (_) {}
+
+  // Method B: Extract user ID and reel_owner_id from story page embedded JSON
+  if (!userId) {
+    try {
+      const pageHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Cookie': cookieStr,
+        'Accept': 'text/html,application/xhtml+xml',
+      };
+      // Scrape the story page directly (not profile) — contains __INITIAL_STATE__ JSON
+      const storyPage = await axios.get(`https://www.instagram.com/stories/${username}/`, { headers: pageHeaders, timeout: 15000 });
+      const html = storyPage.data || '';
+
+      // Try to extract user ID from embedded data with brace-counting (handles nested JSON)
+      const initStateStart = html.indexOf('window.__INITIAL_STATE__');
+      if (initStateStart !== -1) {
+        const jsonStart = html.indexOf('{', initStateStart);
+        if (jsonStart !== -1) {
+          let depth = 0;
+          let jsonEnd = jsonStart;
+          for (let i = jsonStart; i < html.length; i++) {
+            if (html[i] === '{') depth++;
+            else if (html[i] === '}') { depth--; if (depth === 0) { jsonEnd = i + 1; break; } }
+          }
+          if (jsonEnd > jsonStart) {
+            try {
+              const initState = JSON.parse(html.substring(jsonStart, jsonEnd));
+              userId = initState?.reel?.owner?.id || initState?.reel?.user?.id || null;
+              if (userId) console.log(`[IG-API] User ID dari __INITIAL_STATE__: ${userId}`);
+            } catch (_) {}
+          }
+        }
+      }
+
+      // Try to extract reel_owner_id or user id from various patterns
+      if (!userId) {
+        const escUser = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const patterns = [
+          /"reel_owner_id"\s*:\s*"(\d+)"/,
+          new RegExp('"id"\\s*:\\s*"(\\d+)"[\\s\\S]{0,100}"username"\\s*:\\s*"' + escUser + '"'),
+          new RegExp('"owner"\\s*:\\s*\\{[^}]*"id"\\s*:\\s*"(\\d+)"[^}]*"username"\\s*:\\s*"' + escUser + '"'),
+        ];
+        for (const pat of patterns) {
+          const m = html.match(pat);
+          if (m && m[1]) { userId = m[1]; console.log(`[IG-API] User ID dari HTML pattern: ${userId}`); break; }
+        }
+      }
+    } catch (e) {
+      console.log(`[IG-API] Story page scraping gagal: ${e.message.substring(0, 60)}`);
+    }
+  }
+
+  // Method C: Scrape profile page for user ID (fallback)
+  if (!userId) {
+    try {
+      const pageHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Cookie': cookieStr,
+        'Accept': 'text/html,application/xhtml+xml',
+      };
+      const profilePage = await axios.get(`https://www.instagram.com/${username}/`, { headers: pageHeaders, timeout: 15000 });
+      const html = profilePage.data || '';
+      // Try multiple patterns to find user ID
+      const patterns = [
+        /"profilePage_(\d+)"/,
+        /"owner"\s*:\s*\{[^}]*"id"\s*:\s*"(\d+)"/,
+        /"user"\s*:\s*\{[^}]*"id"\s*:\s*"(\d+)"/,
+        /"logging_page_id"\s*:\s*"profilePage_(\d+)"/,
+      ];
+      for (const pat of patterns) {
+        const m = html.match(pat);
+        if (m && m[1]) { userId = m[1]; console.log(`[IG-API] User ID dari profile page: ${userId}`); break; }
+      }
+    } catch (e) {
+      console.log(`[IG-API] Profile page scraping gagal: ${e.message.substring(0, 60)}`);
+    }
+  }
+
+  // Method D: API fallback (only if previous methods didn't give us the ID)
+  if (!userId) {
+    try {
+      const profileResp = await axios.get(
+        `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+        { headers, timeout: 15000 }
+      );
+      userId = profileResp.data?.data?.user?.id;
+    } catch (e1) {
+      console.log(`[IG-API] web_profile_info gagal: ${e1.message.substring(0, 60)}, coba usernameinfo...`);
+      try {
+        const userResp = await axios.get(
+          `https://i.instagram.com/api/v1/users/${username}/usernameinfo/`,
+          { ...headers, timeout: 15000 }
+        );
+        userId = userResp.data?.user?.pk;
+      } catch (e2) {
+        console.log(`[IG-API] usernameinfo juga gagal: ${e2.message.substring(0, 60)}`);
+      }
+    }
+  }
+
+  // Method E: Extract user ID from story media ID using media info API
+  if (!userId) {
+    const storyMediaMatch = url.match(/instagram\.com\/stories\/[\w.]+\/(\d+)/i);
+    if (storyMediaMatch && storyMediaMatch[1]) {
+      const mediaId = storyMediaMatch[1];
+      console.log(`[IG-API] Mencoba media info API untuk media ID: ${mediaId}`);
+      try {
+        const mediaResp = await axios.get(
+          `https://i.instagram.com/api/v1/media/${mediaId}/info/`,
+          { headers, timeout: 15000 }
+        );
+        userId = mediaResp.data?.items?.[0]?.user?.pk ||
+                 mediaResp.data?.item?.user?.pk ||
+                 mediaResp.data?.media?.user?.id ||
+                 null;
+        if (userId) console.log(`[IG-API] User ID dari media info API: ${userId}`);
+      } catch (e) {
+        console.log(`[IG-API] Media info API gagal: ${e.message.substring(0, 60)}`);
+      }
+    }
+  }
+
+  // Method F: Try oEmbed + GraphQL as final fallback (no auth needed for public)
+  if (!userId) {
+    try {
+      const oembedResp = await axios.get(
+        `https://api.instagram.com/oembed/?url=https://www.instagram.com/stories/${username}/&maxwidth=640`,
+        { headers: { "User-Agent": IG_USER_AGENT }, timeout: 10000 }
+      );
+      const authorName = oembedResp.data?.author_name;
+      const authorUrl = oembedResp.data?.author_url;
+      if (authorName) {
+        console.log(`[IG-API] oEmbed: author @${authorName}`);
+        // Use author_name as username for the story
+        if (authorUrl) {
+          const idMatch = authorUrl.match(/instagram\.com\/([^/]+)/);
+          if (idMatch && idMatch[1]) {
+            // Try looking up this user via public API
+            try {
+              const userResp = await axios.get(
+                `https://www.instagram.com/api/v1/users/web_profile_info/?username=${authorName}`,
+                { headers: { ...headers, 'Cookie': '' }, timeout: 10000 }
+              );
+              userId = userResp.data?.data?.user?.id;
+              if (userId) console.log(`[IG-API] User ID dari oEmbed+public API: ${userId}`);
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`[IG-API] oEmbed gagal: ${e.message.substring(0, 60)}`);
+    }
+  }
+
+  if (!userId) throw new Error("User ID tidak ditemukan dari URL maupun API");
+
+  console.log(`[IG-API] User ID @${username} = ${userId}`);
+
+  // Step 2: Fetch reel_media (stories) via web API
+  let storyResp;
+  try {
+    storyResp = await axios.get(
+      `https://www.instagram.com/api/v1/feed/user/${userId}/reel_media/`,
+      { headers, timeout: 30000 }
+    );
+  } catch (e) {
+    // Fallback ke mobile API jika web API gagal
+    try {
+      const mobileUA = 'Instagram 275.0.0.27.98 Android (33/13; 420dpi; 1080x2400; Google; Pixel 6; oriole; oriole; en_US; 458229258)';
+      const mobileHeaders = { ...headers, 'User-Agent': mobileUA, 'Referer': undefined, 'X-Requested-With': undefined };
+      storyResp = await axios.get(
+        `https://i.instagram.com/api/v1/feed/user/${userId}/reel_media/`,
+        { headers: mobileHeaders, timeout: 30000 }
+      );
+    } catch (e2) {
+      throw new Error(`Gagal fetch stories: web=${e.response?.status || 'err'}, mobile=${e2.response?.status || 'err'}`);
+    }
+  }
+
+  const items = storyResp.data?.reel?.items || storyResp.data?.items || [];
+  if (!items.length) throw new Error("Tidak ada story items dari API");
+
+  console.log(`[IG-API] ${items.length} story items ditemukan`);
+
+  // Step 3: Parse each story item
+  const mediaItems = [];
+  for (const item of items) {
+    const isVideo = item.media_type === 2; // 1=photo, 2=video
+    let mediaUrl = null;
+    let thumbUrl = null;
+
+    if (isVideo) {
+      const versions = item.video_versions || [];
+      versions.sort((a, b) => (b.height || 0) - (a.height || 0));
+      mediaUrl = versions[0]?.url || null;
+      const imgVersions = item.image_versions2?.candidates || [];
+      imgVersions.sort((a, b) => (b.width || 0) - (a.width || 0));
+      thumbUrl = imgVersions[0]?.url || null;
+    } else {
+      const imgVersions = item.image_versions2?.candidates || [];
+      imgVersions.sort((a, b) => (b.width || 0) - (a.width || 0));
+      mediaUrl = imgVersions[0]?.url || null;
+      thumbUrl = mediaUrl;
+    }
+
+    if (!mediaUrl) continue;
+
+    mediaUrl = mediaUrl.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+    if (thumbUrl) thumbUrl = thumbUrl.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+
+    const ext = isVideo ? 'mp4' : 'jpg';
+    const width = item.original_width || null;
+    const height = item.original_height || null;
+
+    mediaItems.push({
+      type: isVideo ? 'video' : 'image',
+      url: mediaUrl,
+      thumbnail: thumbUrl || mediaUrl,
+      width, height,
+      duration: item.video_duration || null,
+      ext,
+      formats: [{
+        type: isVideo ? 'video' : 'image',
+        quality: isVideo ? `${height || 0}p` : 'Original',
+        url: mediaUrl,
+        ext
+      }]
+    });
+  }
+
+  if (!mediaItems.length) throw new Error("Tidak ada media yang bisa di-extract dari API");
+
+  const videoCount = mediaItems.filter(m => m.type === 'video').length;
+  const photoCount = mediaItems.filter(m => m.type === 'image').length;
+  console.log(`[IG-API] OK: ${mediaItems.length} items (${videoCount} video, ${photoCount} foto)`);
+
+  return {
+    platform: "instagram",
+    type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+    shortcode: "",
+    author: username,
+    caption: "",
+    title: `Story @${username}`,
+    timestamp: null,
+    likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+    mediaItems,
+    source: "ig_api",
+    warning: null
+  };
+}
+
+// ─── Instagram Story via yt-dlp ─────────────────────────────────────────────
+// Mendukung download story dengan cookies file (untuk akun private) atau tanpa cookies (publik)
+
+async function scrapeInstagramStoryViaYtDlp(url, withCookies = false) {
+  const cookiesFile = getRandomCookieFile();
+  const hasCookies = withCookies && cookiesFile !== null;
+
+  if (withCookies && !hasCookies) {
+    throw new Error("Cookies file tidak ditemukan");
+  }
+
+  const label = withCookies ? "yt-dlp + cookies" : "yt-dlp (no cookies)";
+
+  // Ubah URL spesifik (dengan story ID) ke URL username saja agar yt-dlp download SEMUA story
+  let ytUrl = url;
+  const storyParts = url.match(/instagram\.com\/stories\/([^/?#]+)(?:\/(\d+))?/i);
+  const hasSpecificStory = storyParts && storyParts[2];
+  if (hasSpecificStory) {
+    ytUrl = `https://www.instagram.com/stories/${storyParts[1]}/`;
+    console.log(`[Scraper] URL story spesifik -> coba username all-stories: ${ytUrl}`);
+  }
+
+  async function tryYtDlp(targetUrl) {
+    const args = [
+      "--dump-single-json",
+      "--no-warnings",
+      "--yes-playlist",
+      "--extractor-args", "instagram:api_version=v1",
+      "--no-skip-unavailable-fragments",
+      "--write-all-thumbnails",
+      "--no-check-formats"
+    ];
+    if (hasCookies) args.push("--cookies", cookiesFile);
+    args.push(targetUrl);
+
+    console.log(`[Scraper] Mencoba ${label}...`);
+    const raw = await runCommand("yt-dlp", args, 90000);
+    const info = JSON.parse(raw);
+    const res = parseYtDlpOutput(info, "instagram");
+    const usernameMatch = url.match(/instagram\.com\/stories\/([^/]+)/i);
+    if (usernameMatch && usernameMatch[1]) res.author = usernameMatch[1];
+    return res;
+  }
+
+  // Langkah 1: coba all-stories URL (username saja)
+  let result = null;
+  if (hasSpecificStory) {
+    result = await tryYtDlp(ytUrl);
+    if (result.mediaItems.length > 0) {
+      console.log(`[Scraper] Story OK via all-stories: ${result.mediaItems.length} items`);
+      return result;
+    }
+    console.log(`[Scraper] All-stories kosong (0 item), fallback ke URL story spesifik`);
+  }
+
+  // Langkah 2: coba URL spesifik (fallback untuk story expired yg masih bisa diakses via direct link)
+  result = await tryYtDlp(url);
+  if (result.mediaItems.length > 0) {
+    console.log(`[Scraper] Story OK via URL spesifik: ${result.mediaItems.length} items`);
+    return result;
+  }
+
+  throw new Error("Tidak ada story items dari yt-dlp");
+}
+
+// ─── Instagram Story via Instaloader (Python) ─────────────────────────────────
+// Download stories menggunakan instaloader --stories <username>
+
+async function scrapeInstagramStoryViaInstaloader(url) {
+  // Extract username dari URL: instagram.com/stories/<username>/...
+  const usernameMatch = url.match(/instagram\.com\/stories\/([^/]+)/i);
+  if (!usernameMatch || !usernameMatch[1]) {
+    throw new Error("Username tidak ditemukan dari URL story");
+  }
+  const username = usernameMatch[1];
+  console.log(`[Scraper] Mencoba Instaloader --stories untuk @${username}...`);
+
+  return new Promise((resolve, reject) => {
+    const { exec } = require("child_process");
+    const fs = require("fs");
+    const path = require("path");
+
+    // Check if Python available
+    exec('python3 --version', (err3) => {
+      const pythonCmd = err3 ? 'python' : 'python3';
+      exec(`${pythonCmd} --version`, (err) => {
+        if (err) {
+          return reject(new Error("Python tidak ditemukan untuk Instaloader."));
+        }
+
+        const tempDirName = `temp_ig_story_${Date.now()}`;
+        const cmd = `${pythonCmd} -m instaloader --no-captions --no-metadata-json --stories --dirname-pattern=${tempDirName}/{profile} -- ${username}`;
+
+        exec(cmd, { timeout: 90000 }, (error, stdout, stderr) => {
+          const tempBaseDir = path.join(__dirname, tempDirName);
+
+          if (!fs.existsSync(tempBaseDir)) {
+            console.warn(`[Scraper] Instaloader story error: ${stderr || error?.message || 'Unknown'}`);
+            return reject(new Error("Instaloader gagal: folder tidak dibuat"));
+          }
+
+          try {
+            // Find profile subfolder
+            const subdirs = fs.readdirSync(tempBaseDir).filter(f =>
+              fs.statSync(path.join(tempBaseDir, f)).isDirectory()
+            );
+            const profileName = subdirs.length > 0 ? subdirs[0] : null;
+            const tempDir = profileName ? path.join(tempBaseDir, profileName) : tempBaseDir;
+
+            const files = fs.readdirSync(tempDir);
+            const mediaFiles = files.filter(f =>
+              f.endsWith('.jpg') || f.endsWith('.png') || f.endsWith('.jpeg') || f.endsWith('.mp4') || f.endsWith('.webp')
+            ).sort();
+
+            if (mediaFiles.length === 0) {
+              fs.rmSync(tempBaseDir, { recursive: true, force: true });
+              return reject(new Error("Media story tidak ditemukan dari Instaloader"));
+            }
+
+            // Process files ke base64 data URL
+            const mediaItems = [];
+            for (const file of mediaFiles) {
+              const filePath = path.join(tempDir, file);
+              const stats = fs.statSync(filePath);
+              if (stats.size === 0) continue;
+
+              const isVideo = file.endsWith('.mp4');
+              const ext = isVideo ? 'mp4' : (file.endsWith('.webp') ? 'webp' : 'jpg');
+              const mimeType = isVideo ? 'video/mp4' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+
+              const buffer = fs.readFileSync(filePath);
+              const base64 = buffer.toString('base64');
+              const dataUrl = `data:${mimeType};base64,${base64}`;
+
+              console.log(`[Scraper] Instaloader story: ${file} (${(stats.size / 1024).toFixed(0)}KB)`);
+
+              mediaItems.push({
+                type: isVideo ? "video" : "image",
+                url: dataUrl,
+                thumbnail: dataUrl,
+                width: null,
+                height: null,
+                duration: null,
+                ext: ext,
+                formats: [{
+                  type: isVideo ? "video" : "image",
+                  quality: isVideo ? "HD" : `Story ${mediaItems.length + 1}`,
+                  url: dataUrl,
+                  ext: ext
+                }]
+              });
+            }
+
+            // Clean up
+            fs.rmSync(tempBaseDir, { recursive: true, force: true });
+
+            if (mediaItems.length === 0) {
+              return reject(new Error("Semua file story kosong dari Instaloader"));
+            }
+
+            console.log(`[Scraper] ✅ Instaloader story: ${mediaItems.length} media dari @${username}`);
+
+            resolve({
+              platform: "instagram",
+              type: mediaItems.length > 1 ? "playlist" : mediaItems[0].type,
+              shortcode: "",
+              author: username,
+              caption: "",
+              title: `Story @${username}`,
+              timestamp: null,
+              likeCount: 0,
+              commentCount: 0,
+              viewCount: 0,
+              duration: null,
+              mediaItems: mediaItems,
+              source: "instaloader",
+              warning: null
+            });
+          } catch (fsErr) {
+            try { fs.rmSync(tempBaseDir, { recursive: true, force: true }); } catch (e) {}
+            reject(new Error(`File system error: ${fsErr.message}`));
+          }
+        });
+      });
+    });
+  });
+}
+
 async function scrapeMedia(url) {
+  // Bersihkan URL: hapus trailing ? tanpa query params
+  url = url.replace(/\?$/, '').replace(/&$/, '');
+
   // Deteksi platform
   const detected = detectPlatform(url);
   if (!detected) {
@@ -5174,18 +6321,51 @@ async function scrapeMedia(url) {
   // ─── INSTAGRAM ── Railway-safe strategy (no browser, no cookies-from-browser) ──
   if (platform === "instagram") {
     const isReel = url.includes('/reel/') || url.includes('/reels/');
+    const isStory = isInstagramStoryUrl(url);
     const ytdlpAvailable = await checkYtDlp();
 
     // Helper: coba yt-dlp tanpa cookies (Railway punya yt-dlp dari Dockerfile)
+    // Untuk carousel: gunakan --yes-playlist agar semua slide ter-extract sebagai entries
     async function tryYtDlpDirect() {
       if (!ytdlpAvailable) throw new Error("yt-dlp tidak tersedia");
-      const raw = await runCommand("yt-dlp", [
-        "--dump-single-json", "--no-warnings", "--no-playlist",
-        "--extractor-args", "instagram:direct_video_url=true",
-        url
-      ], 60000);
+      
+      // Reels: tanpa direct_video_url=true untuk dapat format muxed (video+audio 1 file)
+      // Foto/Carousel: pakai direct_video_url=true
+      const isReel = url.includes('/reel/') || url.includes('/reels/');
+      const args = [
+        "--dump-single-json", "--no-warnings",
+        "--yes-playlist"
+      ];
+      
+      if (!isReel) {
+        args.push("--extractor-args", "instagram:direct_video_url=true");
+      }
+      
+      const cookiesFile = getRandomCookieFile();
+      if (cookiesFile) {
+        args.push("--cookies", cookiesFile);
+      }
+      
+      args.push(url);
+      
+      const raw = await runCommand("yt-dlp", args, 60000);
       const info = JSON.parse(raw);
-      return parseYtDlpOutput(info, "instagram");
+      const result = parseYtDlpOutput(info, "instagram");
+      
+      // Enrich dengan oEmbed untuk username & caption yang lebih akurat
+      try {
+        const oembedResp = await axios.get(
+          `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}&maxwidth=640`,
+          { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }
+        );
+        if (oembedResp.data?.author_name) result.author = oembedResp.data.author_name;
+        if (oembedResp.data?.title) {
+          result.caption = oembedResp.data.title;
+          result.title = oembedResp.data.title;
+        }
+      } catch (e) { /* oEmbed enrichment optional */ }
+      
+      return result;
     }
 
     if (isReel) {
@@ -5217,154 +6397,227 @@ async function scrapeMedia(url) {
         if (r.mediaItems.length > 0) { console.log("[Scraper] Reel OK via SnapInsta"); return r; }
       } catch (e) { console.warn("[Scraper] SnapInsta reel gagal:", e.message.substring(0, 80)); }
 
+    } else if (isStory) {
+      // ── STORY ── (Strategi: Kumpulkan & Gabungkan / Collect & Merge)
+      // API gratis sering membatasi maks 6 story per request.
+      // Strategi baru: coba BANYAK API, kumpulkan semua hasilnya, gabungkan & deduplikasi.
+      // Jika yt-dlp+cookies sukses (biasanya mengembalikan SEMUA story), langsung return.
+      const collectedResults = [];
+
+      // === FASE 0: Instagram API (BEST: mengembalikan SEMUA story termasuk FOTO) ===
+      try {
+        const r = await scrapeInstagramStoryViaAPI(url);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Story OK via Instagram API (${r.mediaItems.length} items, termasuk foto)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] Instagram API story gagal:", e.message.substring(0, 80)); }
+
+      // === FASE 1: yt-dlp (tidak ada limit story jika pakai cookies) ===
+      // 1a. yt-dlp dengan cookies file (BEST: mengembalikan SEMUA story)
+      try {
+        const r = await scrapeInstagramStoryViaYtDlp(url, true);
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] Story OK via yt-dlp+cookies (${r.mediaItems.length} items, no limit)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] yt-dlp+cookies story gagal:", e.message.substring(0, 80)); }
+
+      // 1b. yt-dlp tanpa cookies (untuk akun publik, tapi sering terbatas)
+      try {
+        const r = await scrapeInstagramStoryViaYtDlp(url, false);
+        if (r.mediaItems.length > 6) {
+          // Jika yt-dlp tanpa cookies berhasil dapat >6, langsung return (sudah lengkap)
+          console.log(`[Scraper] Story OK via yt-dlp no-cookies (${r.mediaItems.length} items)`);
+          return r;
+        }
+        // Jika dapat ≤6, simpan dulu dan lanjut kumpulkan dari API lain
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] yt-dlp no-cookies: ${r.mediaItems.length} items (akan digabung)`);
+          collectedResults.push(r);
+        }
+      } catch (e) { console.warn("[Scraper] yt-dlp story gagal:", e.message.substring(0, 80)); }
+
+      // === FASE 2: Kumpulkan dari banyak API gratis secara paralel ===
+      // Kita jalankan beberapa API secara bersamaan (paralel) untuk kecepatan
+      const storyUsername = url.match(/stories\/([a-zA-Z0-9_.-]+)/)?.[1] || "Instagram User";
+
+      // Helper: Coba satu API, simpan hasilnya jika berhasil
+      async function tryStoryAPI(name, fn) {
+        try {
+          const r = await fn();
+          if (r && r.mediaItems && r.mediaItems.length > 0) {
+            console.log(`[Scraper] Story ${name}: ${r.mediaItems.length} items dikumpulkan`);
+            return r;
+          }
+        } catch (e) { console.warn(`[Scraper] ${name} story gagal:`, e.message.substring(0, 80)); }
+        return null;
+      }
+
+      // Batch 1: API tercepat (REST API tanpa Playwright)
+      const batch1 = await Promise.allSettled([
+        tryStoryAPI("RapidAPI", () => scrapeViaRapidAPI(url)),
+        tryStoryAPI("SSSSave", () => scrapeInstagramViaSSSSave(url)),
+        tryStoryAPI("igram", () => scrapeInstagramViaIgram(url)),
+        tryStoryAPI("SnapInsta", () => scrapeInstagramViaSnapinsta(url)),
+      ]);
+
+      for (const result of batch1) {
+        if (result.status === "fulfilled" && result.value) {
+          collectedResults.push(result.value);
+        }
+      }
+
+      // Jika sudah dapat banyak dari batch 1, cek apakah gabungan sudah >6
+      const mergedCount1 = mergeStoryResults(collectedResults, storyUsername);
+      if (mergedCount1 && mergedCount1.mediaItems.length > 6) {
+        console.log(`[Scraper] ✅ Story MERGED dari ${collectedResults.length} API: ${mergedCount1.mediaItems.length} items total`);
+        return mergedCount1;
+      }
+
+      // Batch 2: API lebih lambat (npm packages + Playwright)
+      const batch2 = await Promise.allSettled([
+        tryStoryAPI("Bochil", () => scrapeInstagramViaBochil(url)),
+        tryStoryAPI("Mrnima", () => scrapeInstagramViaMrnima(url)),
+        tryStoryAPI("Playwright", () => scrapeInstagramViaIgramPlaywright(url)),
+      ]);
+
+      for (const result of batch2) {
+        if (result.status === "fulfilled" && result.value) {
+          collectedResults.push(result.value);
+        }
+      }
+
+      // Batch 3: Instaloader (paling lambat, Python)
+      const instaloaderResult = await tryStoryAPI("Instaloader", () => scrapeInstagramStoryViaInstaloader(url));
+      if (instaloaderResult) collectedResults.push(instaloaderResult);
+
+      // === FASE 3: Gabungkan & deduplikasi semua hasil ===
+      if (collectedResults.length > 0) {
+        const merged = mergeStoryResults(collectedResults, storyUsername);
+        if (merged && merged.mediaItems.length > 0) {
+          console.log(`[Scraper] ✅ Story MERGED dari ${collectedResults.length} API: ${merged.mediaItems.length} items total`);
+          return merged;
+        }
+      }
+
+      // Semua gagal
+      throw new Error("Story tidak tersedia, private, atau sudah expired");
+
     } else {
       // ── FOTO / CAROUSEL SLIDE ──
-      // Strategi: RapidAPI (paling andal) → Direct API → API publik stabil → yt-dlp → embed fallback
+      // Strategi: Instaloader (paling reliable) → yt-dlp → RapidAPI → API publik gratis → Direct API → Embed
 
-      // 1. [PRIORITAS UTAMA] RapidAPI — paling stabil, support carousel, username real, thumbnail lengkap
-      let firstResult = null;
+      // 1. [PRIORITAS UTAMA] Instaloader (Python) — PALING RELIABLE untuk carousel, support semua tipe foto
+      // Metode ini download file ke disk lalu convert ke base64
+      try {
+        const r = await scrapeInstagramViaInstaloader(url);
+        if (r.mediaItems.length > 0) {
+          // Enrich username & caption via oEmbed
+          try {
+            const oembedResp = await axios.get(
+              `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}&maxwidth=640`,
+              { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }
+            );
+            if (oembedResp.data?.author_name) r.author = oembedResp.data.author_name;
+            if (oembedResp.data?.title) { r.caption = oembedResp.data.title; r.title = oembedResp.data.title; }
+          } catch (e) { /* oEmbed optional */ }
+          
+          console.log(`[Scraper] ✅ Foto/Carousel OK via Instaloader (${r.mediaItems.length} item, author: ${r.author})`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] Instaloader gagal:", e.message.substring(0, 80)); }
+
+      // 2. yt-dlp — support carousel via entries, tanpa API key (kadang gagal untuk foto)
+      try {
+        const r = await tryYtDlpDirect();
+        if (r.mediaItems.length > 0) {
+          console.log(`[Scraper] ✅ Foto OK via yt-dlp (${r.mediaItems.length} item)`);
+          return r;
+        }
+      } catch (e) { console.warn("[Scraper] yt-dlp foto gagal:", e.message.substring(0, 100)); }
+
+      // 3. RapidAPI — stabil, support carousel, username real (tapi ada rate limit)
       try {
         const r = await scrapeViaRapidAPI(url);
         if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via RapidAPI (${r.mediaItems.length} item)`);
+          console.log(`[Scraper] ✅ Foto OK via RapidAPI (${r.mediaItems.length} item)`);
           return r;
         }
       } catch (e) { console.warn("[Scraper] RapidAPI gagal:", e.message.substring(0, 120)); }
 
-      // 2. Direct API: EmbedAPI + GraphQL + HTML Scrape + oEmbed (paralel)
+      // 4. API Publik Gratis (Paralel) — SSSSave, igram, SnapInsta, SaveIG (CEPAT)
+      const publicApis = await Promise.allSettled([
+        (async () => {
+          try {
+            const r = await scrapeInstagramViaSSSSave(url);
+            if (r.mediaItems.length > 0) {
+              console.log(`[Scraper] ✅ Foto OK via SSSSave (${r.mediaItems.length} item)`);
+              return r;
+            }
+          } catch (e) { console.warn("[Scraper] SSSSave gagal:", e.message.substring(0, 80)); }
+          return null;
+        })(),
+        (async () => {
+          try {
+            const r = await scrapeInstagramViaIgram(url);
+            if (r.mediaItems.length > 0) {
+              console.log(`[Scraper] ✅ Foto OK via igram (${r.mediaItems.length} item)`);
+              return r;
+            }
+          } catch (e) { console.warn("[Scraper] igram gagal:", e.message.substring(0, 80)); }
+          return null;
+        })(),
+        (async () => {
+          try {
+            const r = await scrapeInstagramViaSnapinsta(url);
+            if (r.mediaItems.length > 0) {
+              console.log(`[Scraper] ✅ Foto OK via SnapInsta (${r.mediaItems.length} item)`);
+              return r;
+            }
+          } catch (e) { console.warn("[Scraper] SnapInsta gagal:", e.message.substring(0, 80)); }
+          return null;
+        })(),
+        (async () => {
+          try {
+            const r = await scrapeInstagramViaSaveIG(url);
+            if (r.mediaItems.length > 0) {
+              console.log(`[Scraper] ✅ Foto OK via SaveIG (${r.mediaItems.length} item)`);
+              return r;
+            }
+          } catch (e) { console.warn("[Scraper] SaveIG gagal:", e.message.substring(0, 80)); }
+          return null;
+        })()
+      ]);
+
+      // Gunakan hasil pertama yang berhasil
+      for (const result of publicApis) {
+        if (result.status === "fulfilled" && result.value) {
+          return result.value;
+        }
+      }
+
+      // 5. Direct API: EmbedAPI + GraphQL + HTML Scrape (CEPAT & NO DOWNLOAD)
       try {
         const r = await scrapeInstagramViaDirectAPI(url);
         if (r.mediaItems.length > 0) {
-          // Jika hanya 1 item, simpan tapi lanjutkan coba metode lain (mungkin carousel)
-          if (r.mediaItems.length === 1) {
-            firstResult = r;
-            console.log(`[Scraper] Direct API: 1 item (akan cek carousel via metode lain)`);
-          } else {
-            console.log(`[Scraper] Foto OK via Direct API (${r.mediaItems.length} item)`);
-            return r;
-          }
+          console.log(`[Scraper] ✅ Foto OK via Direct API (${r.mediaItems.length} item)`);
+          return r;
         }
       } catch (e) { console.warn("[Scraper] Direct API gagal:", e.message.substring(0, 120)); }
 
-      // 3. SSSSave — stabil, tidak butuh auth, support carousel
-      try {
-        const r = await scrapeInstagramViaSSSSave(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via SSSSave (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] SSSSave gagal:", e.message.substring(0, 80)); }
-
-      // 4. igram.world — support carousel JSON response
-      try {
-        const r = await scrapeInstagramViaIgram(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via igram (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] igram gagal:", e.message.substring(0, 80)); }
-
-      // 5. SnapInsta
-      try {
-        const r = await scrapeInstagramViaSnapinsta(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via SnapInsta (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] SnapInsta gagal:", e.message.substring(0, 80)); }
-
-      // 6. SaveIG
-      try {
-        const r = await scrapeInstagramViaSaveIG(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via SaveIG (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] SaveIG gagal:", e.message.substring(0, 80)); }
-
-      // 6b. SnapInst — carousel JSON API
-      try {
-        const r = await scrapeInstagramViaSnapInst(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via SnapInst (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] SnapInst gagal:", e.message.substring(0, 80)); }
-
-      // 7. yt-dlp foto (bisa handle foto tunggal & carousel via --dump-single-json)
-      try {
-        const r = await tryYtDlpDirect();
-        if (r.mediaItems.length > 0) {
-          if (r.mediaItems.length === 1 && !firstResult) {
-            firstResult = r;
-            console.log(`[Scraper] yt-dlp: 1 item (akan cek carousel via Playwright)`);
-          } else if (r.mediaItems.length > 1) {
-            console.log(`[Scraper] Foto OK via yt-dlp (${r.mediaItems.length} item)`);
-            return r;
-          }
-        }
-      } catch (e) { console.warn("[Scraper] yt-dlp foto gagal:", e.message.substring(0, 100)); }
-
-      // 8. @bochilteam
-      try {
-        const r = await scrapeInstagramViaBochil(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via @bochilteam (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] @bochilteam gagal:", e.message.substring(0, 80)); }
-
-      // 9. Instagram Embed (carousel-aware)
+      // 6. Embed Page — carousel detection via JSON sidecar data (CEPAT, tanpa API key)
       try {
         const r = await scrapeInstagramViaEmbed(url);
         if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via Embed (${r.mediaItems.length} item)`);
+          console.log(`[Scraper] ✅ Foto/Carousel OK via Embed (${r.mediaItems.length} item)`);
           return r;
         }
       } catch (e) { console.warn("[Scraper] Embed gagal:", e.message.substring(0, 80)); }
 
-      // 10. Simple HTML scraper (carousel-aware, Railway-safe)
-      try {
-        const r = await scrapeInstagramSimple(url);
-        if (r.mediaItems.length > 0) {
-          console.log(`[Scraper] Foto OK via Simple (${r.mediaItems.length} item)`);
-          return r;
-        }
-      } catch (e) { console.warn("[Scraper] Simple gagal:", e.message.substring(0, 80)); }
-
-      // 11. Instaloader Python (ada di Dockerfile, Railway support)
-      try {
-        const r = await scrapeInstagramViaInstaloader(url);
-        console.log("[Scraper] Foto OK via Instaloader");
-        return r;
-      } catch (e) { console.warn("[Scraper] Instaloader gagal:", e.message.substring(0, 80)); }
-
-      // 12. Playwright (carousel-aware, fallback when semua API gagal)
-      try {
-        const r = await scrapeInstagramViaPlaywright(url);
-        if (r.mediaItems.length > 0) {
-          // Jika Playwright menemukan lebih banyak item dari firstResult (carousel!)
-          if (firstResult && r.mediaItems.length > firstResult.mediaItems.length) {
-            console.log(`[Scraper] ✅ Carousel ditemukan via Playwright (${r.mediaItems.length} item, sebelumnya ${firstResult.mediaItems.length})`);
-            return r;
-          }
-          if (!firstResult) {
-            console.log(`[Scraper] Foto OK via Playwright (${r.mediaItems.length} item)`);
-            return r;
-          }
-          // Playwright punya same/lower count, gunakan firstResult
-          console.log(`[Scraper] Playwright: ${r.mediaItems.length} item (tidak lebih dari Direct API)`);
-        }
-      } catch (e) { console.warn("[Scraper] Playwright gagal:", e.message.substring(0, 120)); }
-
-      // Fallback: jika firstResult ada (1 item dari Direct API), gunakan itu
-      if (firstResult) {
-        console.log(`[Scraper] Menggunakan hasil Direct API (1 item - bukan carousel atau carousel tidak bisa diakses)`);
-        return firstResult;
-      }
+      // Semua metode gagal
+      throw new Error("Instagram foto/carousel tidak bisa didownload. Coba lagi nanti.");
     }
-    
-    // cookies-from-browser DILEWATI di Railway (tidak ada browser)
   }
 
   // Prioritaskan @tobyg74/tiktok-api-dl untuk TikTok agar foto slide & story ditangani dengan baik
@@ -5387,6 +6640,7 @@ async function scrapeMedia(url) {
           return apiDlV3Result;
         } catch (err3) {
           console.warn(`[Scraper] tiktok-api-dl v3 gagal, mencoba fallback yt-dlp... ${err3.message}`);
+          // Fallback akan dilanjutkan ke yt-dlp di bawah
         }
       }
     }
