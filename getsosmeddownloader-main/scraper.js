@@ -175,6 +175,17 @@ const PLATFORMS = {
     pathPatterns: [],
     requiresPath: false,
   },
+  ucweb: {
+    name: "UC Drive",
+    icon: "☁️",
+    hostPatterns: [
+      /^(www\.)?drive\.ucweb\.com$/,
+      /^(www\.)?drive\.uc\.cn$/,
+      /^m-intldrive\.ucweb\.com$/,
+    ],
+    pathPatterns: [/\/s\//],
+    requiresPath: true,
+  },
 };
 
 /**
@@ -4450,6 +4461,178 @@ async function scrapeVidayVidey(url, platform = "viday") {
   };
 }
 
+// ─── UC Drive Scraper ─────────────────────────────────────────────────
+
+/**
+ * Scraper untuk UC Drive (drive.ucweb.com) — menggunakan API publik tanpa login.
+ * Flow: token → list files → video_preview (direct OSS URL)
+ */
+async function scrapeUcwebDrive(url) {
+  console.log(`[Scraper] Mengambil file dari UC Drive...`);
+  const API_BASE = "https://m-intldrive.ucweb.com";
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  const API_HEADERS = {
+    "User-Agent": UA,
+    "Content-Type": "application/json",
+    "Referer": "https://drive.ucweb.com/",
+    "X-U-Req-Res-Encoding": "no",  // Bypass wg encoding, return plain JSON
+  };
+
+  // Extract pwd_id from URL path: /s/{pwd_id}
+  const parsedUrl = new URL(url);
+  const pathMatch = parsedUrl.pathname.match(/\/s\/([a-zA-Z0-9]+)/);
+  if (!pathMatch) throw new Error("URL UC Drive tidak valid, format: /s/{id}");
+  const pwdId = pathMatch[1];
+  console.log(`[Scraper] UC Drive share ID: ${pwdId}`);
+
+  // Step 1: Get share token
+  let stoken;
+  try {
+    const tokenResp = await axios.post(
+      `${API_BASE}/1/clouddrive/share/sharepage/token`,
+      { pwd_id: pwdId, passcode: "" },
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    stoken = tokenResp.data?.data?.stoken;
+    if (!stoken) throw new Error("Token tidak ditemukan");
+    console.log(`[Scraper] UC Drive token berhasil`);
+  } catch (err) {
+    throw new Error(`Gagal mendapatkan token UC Drive: ${err.message}`);
+  }
+
+  // Step 2: List files (supports folders)
+  async function listFiles(pdirFid = "") {
+    const body = { pwd_id: pwdId, stoken, pdir_fid: pdirFid, page: 1, size: 100 };
+    const resp = await axios.post(
+      `${API_BASE}/1/clouddrive/share/sharepage/v2/detail?pr=UCBrowser&fr=h5`,
+      body,
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    return resp.data?.data?.detail_info?.list || resp.data?.data?.list || [];
+  }
+
+  // Step 3: Get video preview URL (no auth required)
+  async function getVideoPreview(fid, fidToken) {
+    const params = new URLSearchParams({
+      pr: "UCBrowser", fr: "h5",
+      pwd_id: pwdId, stoken,
+      fid, fid_token: fidToken, isH5: "true",
+    });
+    const resp = await axios.get(
+      `${API_BASE}/1/clouddrive/share/sharepage/video_preview?${params}`,
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    const playInfo = resp.data?.data?.play_info;
+    if (playInfo?.url) return playInfo;
+    // Fallback: check preview_url
+    if (resp.data?.data?.preview_url) return { url: resp.data.data.preview_url, resolution: "original", format: "mp4" };
+    return null;
+  }
+
+  // Collect all video files (recursively for folders)
+  const allFiles = [];
+  async function collectFiles(pdirFid = "", depth = 0) {
+    if (depth > 3) return; // limit recursion
+    const files = await listFiles(pdirFid);
+    for (const f of files) {
+      if (f.dir === true) {
+        // It's a folder, recurse
+        await collectFiles(f.fid, depth + 1);
+      } else {
+        allFiles.push(f);
+      }
+    }
+  }
+
+  await collectFiles();
+
+  if (allFiles.length === 0) {
+    throw new Error("Tidak ada file di share UC Drive ini");
+  }
+
+  console.log(`[Scraper] UC Drive: ${allFiles.length} file ditemukan`);
+
+  // Filter video files and get preview URLs
+  const mediaItems = [];
+  for (const f of allFiles) {
+    const isVideo = /\.(mp4|mkv|avi|mov|webm|flv)$/i.test(f.file_name || '') ||
+                    (f.format_type && f.format_type.includes('video')) ||
+                    (f.obj_category && f.obj_category === 'video');
+    if (!isVideo) continue;
+
+    let videoUrl = null;
+    let resolution = "original";
+    try {
+      const preview = await getVideoPreview(f.fid, f.share_fid_token);
+      if (preview?.url) {
+        videoUrl = preview.url;
+        resolution = preview.resolution || "original";
+      }
+    } catch (e) {
+      console.log(`[Scraper] UC Drive preview gagal untuk ${f.file_name}: ${e.message}`);
+    }
+
+    if (!videoUrl) continue;
+
+    const sizeBytes = f.size || 0;
+    const sizeMB = (sizeBytes / 1048576).toFixed(1);
+    const ext = (f.file_name || '').split('.').pop().toLowerCase() || 'mp4';
+
+    mediaItems.push({
+      type: "video",
+      url: videoUrl,
+      thumbnail: f.thumbnail || f.big_thumbnail || null,
+      width: f.width || null,
+      height: f.height || null,
+      duration: f.duration ? Math.round(f.duration / 1000) : null,
+      ext,
+      fileName: f.file_name || `video.${ext}`,
+      fileSize: sizeBytes,
+      formats: [{ type: "video", quality: resolution, url: videoUrl, ext }],
+    });
+  }
+
+  if (mediaItems.length === 0) {
+    // No videos found, try returning all files as generic downloads
+    for (const f of allFiles) {
+      const ext = (f.file_name || '').split('.').pop().toLowerCase() || 'bin';
+      mediaItems.push({
+        type: "file",
+        url: `https://drive.ucweb.com/s/${pwdId}`, // fallback URL
+        thumbnail: null,
+        width: null, height: null, duration: null,
+        ext,
+        fileName: f.file_name || `file.${ext}`,
+        fileSize: f.size || 0,
+        formats: [{ type: "file", quality: "original", url: `https://drive.ucweb.com/s/${pwdId}`, ext }],
+        warning: "Login UC Drive diperlukan untuk download file non-video.",
+      });
+    }
+  }
+
+  if (mediaItems.length === 0) {
+    throw new Error("Tidak ada file yang bisa didownload dari UC Drive");
+  }
+
+  const shareTitle = `UC Drive ${pwdId}`;
+  return {
+    platform: "ucweb",
+    type: mediaItems.length > 1 ? "carousel" : "video",
+    shortcode: pwdId,
+    author: "UC Drive",
+    caption: shareTitle,
+    title: shareTitle,
+    timestamp: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: null,
+    mediaItems,
+    source: "ucweb-api",
+    warning: mediaItems.some(m => m.warning) ? "Beberapa file memerlukan login UC Drive." : null,
+  };
+}
+
 /**
  * Scraper untuk bokepbox (.media / .tv) — direct URL atau HTML page
  */
@@ -6953,7 +7136,7 @@ async function scrapeMedia(url) {
   if (!detected) {
     throw new Error(
       "URL tidak valid atau platform tidak didukung. " +
-      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, Vizey, Slicidrive, Bokepbox, Bokepbox TV."
+      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, UC Drive, Vizey, Slicidrive, Bokepbox, Bokepbox TV."
     );
   }
 
@@ -7386,6 +7569,18 @@ async function scrapeMedia(url) {
       source: "direct-cdn",
       warning: null,
     };
+  }
+
+  // UC Drive: API-based scraper (no login required for video preview)
+  if (platform === "ucweb") {
+    try {
+      const result = await scrapeUcwebDrive(url);
+      console.log(`[Scraper] UC Drive berhasil (${result.mediaItems.length} file)`);
+      return result;
+    } catch (err) {
+      console.warn(`[Scraper] UC Drive gagal: ${err.message}`);
+      throw new Error(`UC Drive download gagal: ${err.message}`);
+    }
   }
 
   if (platform === "pinterest") {

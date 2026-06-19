@@ -206,6 +206,10 @@ function isAllowedCdnUrl(urlString) {
       /\.bokepbox\.media$/,               // bokepbox.media CDN
       /(^|\.)bokepbox\.tv$/,              // bokepbox.tv
       /^cdn\.bokepbox\.media$/,
+      // UC Drive CDN (Alibaba OSS)
+      /\.aliyuncs\.com$/,                  // UC Drive video CDN (Alibaba OSS)
+      /\.pds\.yolicart\.com$/,             // UC Drive thumbnail CDN
+      /\.peco\.uodoo\.com$/,               // UC Drive user assets
       // Local server (for yt-dlp downloaded files)
       /^localhost$/,
       /^127\.0\.0\.1$/,
