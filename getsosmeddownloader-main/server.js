@@ -210,6 +210,7 @@ function isAllowedCdnUrl(urlString) {
       /\.aliyuncs\.com$/,                  // UC Drive video CDN (Alibaba OSS)
       /\.pds\.yolicart\.com$/,             // UC Drive thumbnail CDN
       /\.peco\.uodoo\.com$/,               // UC Drive user assets
+      /\.uc-share\.com$/,                  // uc-share.com (UC Drive mirror)
       // Local server (for yt-dlp downloaded files)
       /^localhost$/,
       /^127\.0\.0\.1$/,

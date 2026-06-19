@@ -182,6 +182,7 @@ const PLATFORMS = {
       /^(www\.)?drive\.ucweb\.com$/,
       /^(www\.)?drive\.uc\.cn$/,
       /^m-intldrive\.ucweb\.com$/,
+      /^(www\.)?uc-share\.com$/,
     ],
     pathPatterns: [/\/s\//],
     requiresPath: true,
