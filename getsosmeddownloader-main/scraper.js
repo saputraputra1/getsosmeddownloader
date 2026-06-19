@@ -7,6 +7,8 @@
 
 const { execFile, exec } = require("child_process");
 const axios = require("axios");
+const path = require("path");
+const fs = require("fs");
 const Tiktok = require("@tobyg74/tiktok-api-dl");
 
 // Default headers untuk Instagram GraphQL
@@ -123,6 +125,55 @@ const PLATFORMS = {
       /\/@[\w.]+\/post\/[\w-]+/,
     ],
     requiresPath: true,
+  },
+  viday: {
+    name: "Viday",
+    icon: "🎬",
+    hostPatterns: [
+      /^(www\.)?viday\.de$/,
+    ],
+    pathPatterns: [],
+    requiresPath: false,
+  },
+  videy: {
+    name: "Videy",
+    icon: "🎬",
+    hostPatterns: [
+      /^(www\.)?videy\.(co|llc|it)$/,
+      /^(www\.)?vihey\.(co|llc)$/,
+      /^cdn2\.vihey\.co$/,
+      /^cdn2\.videy\.it$/,
+    ],
+    pathPatterns: [],
+    requiresPath: false,
+  },
+  bokepbox: {
+    name: "Bokepbox",
+    icon: "🎬",
+    hostPatterns: [
+      /(^|\.)bokepbox\.media$/,
+      /(^|\.)bokepbox\.tv$/,
+    ],
+    pathPatterns: [],
+    requiresPath: false,
+  },
+  vizey: {
+    name: "Vizey",
+    icon: "🎬",
+    hostPatterns: [
+      /^cdn2\.vizey\.de$/,
+    ],
+    pathPatterns: [],
+    requiresPath: false,
+  },
+  slicidrive: {
+    name: "Slicidrive",
+    icon: "🎬",
+    hostPatterns: [
+      /^cdn2\.slicidrive\.de$/,
+    ],
+    pathPatterns: [],
+    requiresPath: false,
   },
 };
 
@@ -313,8 +364,8 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       break;
 
     case "youtube":
-      args.push("--extractor-args", "youtube:player_client=tv_embedded;player_skip=webpage");
-      args.push("--extractor-retries", "3");
+      args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage");
+      args.push("--extractor-retries", "5");
       break;
 
     case "tiktok":
@@ -4050,6 +4101,580 @@ async function scrapePinterestViaYtDlp(url) {
   });
 }
 
+// ─── Viday & Videy Scraper ─────────────────────────────────────────────────
+
+/**
+ * Scraper untuk viday.de dan videy.co/llc.
+ * Video URL langsung dari <source> tag di halaman HTML.
+ * Untuk videy, fallback ke Playwright jika CDN diblokir.
+ */
+async function scrapeVidayVidey(url, platform = "viday") {
+  console.log(`[Scraper] Mengambil video dari ${platform}...`);
+
+  // ── Videy: construct CDN URL directly (SPA, no server-rendered HTML) ──
+  if (platform === "videy") {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    // ── cdn2.videy.it: serves HTML wrapper with real video URL inside ──
+    if (hostname.includes('videy.it')) {
+      console.log(`[Scraper] Videy.it CDN URL terdeteksi, mengambil HTML untuk extract URL video...`);
+      try {
+        const htmlResp = await axios.get(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://videy.co/",
+          },
+          timeout: 15000,
+          responseType: "text",
+        });
+        const ct = (htmlResp.headers["content-type"] || "").toLowerCase();
+
+        // If it returns actual video (not HTML), use URL directly
+        if (ct.startsWith("video/")) {
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+          const ext = dotIdx !== -1 ? filename.substring(dotIdx + 1).toLowerCase() : 'mp4';
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{ type: "video", url, thumbnail: url, width: null, height: null, duration: null, ext, formats: [{ type: "video", quality: "HD", url, ext }] }],
+            source: "cdn-direct", warning: null,
+          };
+        }
+
+        // HTML response: extract real video URL from JavaScript
+        const html = htmlResp.data;
+        const videoUrlMatch = html.match(/const\s+videoUrl\s*=\s*["']([^"']+)["']/i)
+          || html.match(/videoUrl\s*=\s*["']([^"']+\.m[p4][^"']*)["']/i)
+          || html.match(/src\s*=\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
+
+        if (videoUrlMatch && videoUrlMatch[1]) {
+          let realVideoUrl = videoUrlMatch[1].replace(/&amp;/g, '&');
+          console.log(`[Scraper] Videy.it URL video asli: ${realVideoUrl}`);
+
+          // Normalize to HTTP for ISP-blocked regions
+          const normalizedUrl = realVideoUrl.replace(/^https:\/\//i, 'http://');
+          const ext = realVideoUrl.includes('.m3u8') ? 'm3u8' : 'mp4';
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{
+              type: "video", url: normalizedUrl, thumbnail: normalizedUrl,
+              width: null, height: null, duration: null, ext,
+              formats: [{ type: "video", quality: "HD", url: normalizedUrl, ext }],
+            }],
+            source: "videy.it-extract",
+            warning: "Video diekstrak dari halaman videy.it. Jika tidak bisa diputar, coba gunakan VPN.",
+          };
+        }
+
+        // Fallback: cari URL mp4 apapun di HTML
+        const mp4Match = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/i);
+        if (mp4Match) {
+          let realVideoUrl = mp4Match[0].replace(/&amp;/g, '&');
+          console.log(`[Scraper] Videy.it URL video (fallback): ${realVideoUrl}`);
+          const normalizedUrl = realVideoUrl.replace(/^https:\/\//i, 'http://');
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{
+              type: "video", url: normalizedUrl, thumbnail: normalizedUrl,
+              width: null, height: null, duration: null, ext: 'mp4',
+              formats: [{ type: "video", quality: "HD", url: normalizedUrl, ext: 'mp4' }],
+            }],
+            source: "videy.it-extract",
+            warning: "Video diekstrak dari halaman videy.it. Jika tidak bisa diputar, coba gunakan VPN.",
+          };
+        }
+
+        throw new Error("Tidak dapat menemukan URL video di halaman videy.it");
+      } catch (err) {
+        if (err.message.includes('Tidak dapat menemukan')) throw err;
+        console.log(`[Scraper] Videy.it fetch gagal: ${err.message}, mencoba URL langsung`);
+        // Fallback: return URL as-is
+        const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+        const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+        const dotIdx = filename.lastIndexOf('.');
+        const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+        const ext = dotIdx !== -1 ? filename.substring(dotIdx + 1).toLowerCase() : 'mp4';
+        return {
+          platform, type: "video", shortcode: videoId, author: platform,
+          caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+          timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+          mediaItems: [{ type: "video", url, thumbnail: url, width: null, height: null, duration: null, ext, formats: [{ type: "video", quality: "HD", url, ext }] }],
+          source: "cdn-direct",
+          warning: "Gagal mengekstrak URL dari videy.it. URL dikembalikan apa adanya.",
+        };
+      }
+    }
+
+    // ── videy.co / videy.llc: construct CDN URL from id parameter ──
+    let videoId, ext;
+
+    if (parsedUrl.searchParams.get("id")) {
+      videoId = parsedUrl.searchParams.get("id");
+      ext = (videoId.length === 9 && videoId.endsWith("2")) ? "mov" : "mp4";
+    } else {
+      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+      const filename = pathParts[pathParts.length - 1] || '';
+      const dotIdx = filename.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        videoId = filename.substring(0, dotIdx);
+        ext = filename.substring(dotIdx + 1).toLowerCase() || 'mp4';
+      } else {
+        videoId = filename;
+        ext = 'mp4';
+      }
+    }
+
+    if (!videoId) {
+      throw new Error("URL videy tidak memiliki video ID");
+    }
+
+    const cdnUrl = `http://cdn2.videy.co/${videoId}.${ext}`;
+    console.log(`[Scraper] Videy CDN URL (constructed): ${cdnUrl}`);
+
+    try {
+      const headResp = await axios.head(cdnUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Referer": "https://videy.co/",
+        },
+        timeout: 10000,
+        validateStatus: (s) => s < 400,
+      });
+      const ct = (headResp.headers["content-type"] || "").toLowerCase();
+      if (!ct.startsWith("video/") && !ct.startsWith("application/octet-stream")) {
+        console.log(`[Scraper] Videy CDN returned non-video content-type: ${ct}, URL may be invalid`);
+      }
+    } catch (headErr) {
+      console.log(`[Scraper] Videy CDN HEAD gagal: ${headErr.message}, tetap menggunakan URL`);
+    }
+
+    const shortcode = videoId;
+    const title = `Videy ${videoId}`;
+
+    return {
+      platform,
+      type: "video",
+      shortcode,
+      author: platform,
+      caption: title,
+      title,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems: [{
+        type: "video",
+        url: cdnUrl,
+        thumbnail: cdnUrl,
+        width: null,
+        height: null,
+        duration: null,
+        ext,
+        formats: [{ type: "video", quality: "HD", url: cdnUrl, ext }],
+      }],
+      source: "cdn-direct",
+      warning: "CDN videy menggunakan HTTP karena HTTPS diblokir ISP/SSL expired. Jika gagal, coba gunakan VPN.",
+    };
+  }
+
+  // ── Viday: scrape HTML for <source> tag ──
+  const response = await axios.get(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+      "Referer": "https://videy.co/",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      "Upgrade-Insecure-Requests": "1",
+    },
+    timeout: 15000,
+    responseType: "text",
+  });
+
+  const ct = (response.headers["content-type"] || "").toLowerCase();
+
+  // Jika URL mengarah langsung ke video (content-type video/*), skip HTML scrape
+  if (ct.startsWith("video/")) {
+    const title = url.split('/').pop().replace(/\.mp4.*/i, '') || platform;
+    let finalUrl = url;
+    if (platform === "videy") {
+      finalUrl = url.replace(/^https:\/\//i, 'http://').replace(/cdn\.videy\.co/i, 'cdn2.videy.co');
+    }
+    return {
+      platform,
+      type: "video",
+      shortcode: title,
+      author: platform,
+      caption: title,
+      title,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems: [{
+        type: "video",
+        url: finalUrl,
+        thumbnail: finalUrl,
+        width: null,
+        height: null,
+        duration: null,
+        ext: "mp4",
+        formats: [{ type: "video", quality: "HD", url: finalUrl, ext: "mp4" }],
+      }],
+      source: "direct-url",
+      warning: platform === "videy" ? "CDN videy.co diblokir ISP (Internet Positif). Video diambil dari cdn2.videy.co via HTTP. Jika gagal, coba gunakan VPN." : null,
+    };
+  }
+
+  const html = response.data;
+
+  // Cari <source> tags di dalam <video>
+  const sourceRegex = /<source[^>]+src\s*=\s*"([^"]+\.mp4[^"]*)"[^>]*>/gi;
+  const videoUrls = [];
+  let m;
+  while ((m = sourceRegex.exec(html)) !== null) {
+    let videoUrl = m[1].replace(/&amp;/g, '&');
+    const hashIdx = videoUrl.indexOf('#');
+    if (hashIdx !== -1) videoUrl = videoUrl.substring(0, hashIdx);
+    if (videoUrl.startsWith('http') && !videoUrls.includes(videoUrl)) {
+      videoUrls.push(videoUrl);
+    }
+  }
+
+  // Fallback: cari src langsung di <video> tag
+  if (videoUrls.length === 0) {
+    const videoDirectRegex = /<video[^>]+src\s*=\s*"([^"]+\.mp4[^"]*)"[^>]*>/i;
+    const directMatch = html.match(videoDirectRegex);
+    if (directMatch) {
+      let videoUrl = directMatch[1].replace(/&amp;/g, '&');
+      const hashIdx = videoUrl.indexOf('#');
+      if (hashIdx !== -1) videoUrl = videoUrl.substring(0, hashIdx);
+      if (videoUrl.startsWith('http')) videoUrls.push(videoUrl);
+    }
+  }
+
+  // Fallback: cari URL mp4 apapun di halaman (CDN langsung)
+  if (videoUrls.length === 0) {
+    const cdnRegex = /https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi;
+    while ((m = cdnRegex.exec(html)) !== null) {
+      let videoUrl = m[0].replace(/&amp;/g, '&');
+      const hashIdx = videoUrl.indexOf('#');
+      if (hashIdx !== -1) videoUrl = videoUrl.substring(0, hashIdx);
+      if (!videoUrls.includes(videoUrl)) videoUrls.push(videoUrl);
+    }
+  }
+
+  if (videoUrls.length === 0) {
+    throw new Error(`Tidak dapat menemukan video di halaman ${platform}`);
+  }
+
+  // Ambil judul dari <title>
+  let title = "";
+  const titleMatch = html.match(/<title>([^<]*)<\/title>/i);
+  if (titleMatch) title = titleMatch[1].trim();
+
+  // Ekstrak thumbnail dari poster attribute <video> atau og:image
+  let thumbnail = null;
+  const posterMatch = html.match(/<video[^>]+poster\s*=\s*"([^"]+)"[^>]*>/i);
+  if (posterMatch) thumbnail = posterMatch[1];
+  if (!thumbnail) {
+    const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+    if (ogImageMatch) thumbnail = ogImageMatch[1];
+  }
+
+  const bestUrl = videoUrls[0];
+
+  // Fallback: gunakan video URL sebagai thumbnail jika tidak ada gambar
+  if (!thumbnail && bestUrl) {
+    thumbnail = bestUrl;
+  }
+
+  const finalUrl = bestUrl;
+  const formats = videoUrls.map((u, i) => ({
+    type: "video",
+    quality: i === 0 ? "HD" : `Mirror ${i + 1}`,
+    url: u,
+    ext: "mp4",
+  }));
+
+  const shortcode = new URL(url).searchParams.get('id') || url.split('/').pop().replace(/\.mp4.*/i, '') || "unknown";
+
+  return {
+    platform,
+    type: "video",
+    shortcode,
+    author: platform,
+    caption: title,
+    title,
+    timestamp: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: null,
+    mediaItems: [{
+      type: "video",
+      url: finalUrl,
+      thumbnail,
+      width: null,
+      height: null,
+      duration: null,
+      ext: "mp4",
+      formats,
+    }],
+    source: "html-scrape",
+    warning: null,
+  };
+}
+
+/**
+ * Scraper untuk bokepbox (.media / .tv) — direct URL atau HTML page
+ */
+async function scrapeBokepbox(url) {
+  console.log(`[Scraper] Mengambil video dari bokepbox...`);
+
+  // Jika direct video M3U8/MP4, return langsung
+  if (/\.(m3u8|mp4)($|\?|#)/i.test(url)) {
+    const title = decodeURIComponent(url.split('/').pop().replace(/\.(m3u8|mp4).*/i, '').replace(/[_-]/g, ' ')) || 'bokepbox';
+    const shortcode = decodeURIComponent(url.split('/').filter(s => s).slice(-2, -1)[0] || title).substring(0, 30);
+    const ext = url.match(/\.(m3u8|mp4)/i)?.[1].toLowerCase() || 'mp4';
+    return {
+      platform: "bokepbox",
+      type: "video",
+      shortcode,
+      author: "bokepbox",
+      caption: title,
+      title,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems: [{
+        type: "video", url, thumbnail: null,
+        width: null, height: null, duration: null, ext,
+        formats: [{ type: "video", quality: "HD", url, ext }],
+      }],
+      source: "direct-url",
+      warning: null,
+    };
+  }
+
+  // Coba scrape HTML page untuk cari video URL
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,*/*",
+        "Referer": "https://bokepbox.tv/",
+      },
+      timeout: 15000,
+      httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }),
+    });
+
+    const html = response.data;
+    const ct = (response.headers["content-type"] || "").toLowerCase();
+
+    // Jika diblokir ISP (Internet Positif)
+    if (ct.includes("text/html") && html.includes("Internet Positif")) {
+      return {
+        platform: "bokepbox", type: "video",
+        shortcode: "blocked", author: "bokepbox",
+        caption: "Halaman diblokir ISP (Internet Positif)", title: "Diblokir ISP",
+        timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+        mediaItems: [{
+          type: "video", url, thumbnail: null,
+          width: null, height: null, duration: null, ext: "mp4",
+          formats: [{ type: "video", quality: "HD", url, ext: "mp4" }],
+        }],
+        source: "blocked",
+        warning: "Domain ini diblokir ISP (Internet Positif). Coba gunakan VPN atau deploy ke Railway.",
+      };
+    }
+
+    // Cari M3U8 / MP4 di halaman
+    let videoUrl = null;
+    const m3u8Match = html.match(/https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*/i);
+    const mp4Match = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/i);
+    const videoSrc = html.match(/<video[^>]+src\s*=\s*"([^"]+)"/i);
+
+    if (m3u8Match) videoUrl = m3u8Match[0];
+    else if (mp4Match) videoUrl = mp4Match[0];
+    else if (videoSrc) videoUrl = videoSrc[1];
+
+    const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() || 'Bokepbox';
+    const shortcode = title.substring(0, 30);
+
+    if (videoUrl) {
+      const ext = videoUrl.match(/\.(m3u8|mp4)/i)?.[1]?.toLowerCase() || 'mp4';
+      return {
+        platform: "bokepbox", type: "video", shortcode, author: "bokepbox",
+        caption: title, title,
+        timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+        mediaItems: [{
+          type: "video", url: videoUrl, thumbnail: null,
+          width: null, height: null, duration: null, ext,
+          formats: [{ type: "video", quality: "HD", url: videoUrl, ext }],
+        }],
+        source: "html-scrape",
+        warning: null,
+      };
+    }
+
+    // Fallback: return URL asli
+    throw new Error("Tidak ditemukan video di halaman");
+  } catch (err) {
+    if (err.message?.includes("blocked")) throw err;
+    console.warn(`[Scraper] bokepbox HTML scrape gagal: ${err.message}, fallback URL langsung`);
+    const shortcode = url.split('/').filter(s => s).slice(-1)[0]?.substring(0, 20) || 'bokepbox';
+    return {
+      platform: "bokepbox", type: "video", shortcode, author: "bokepbox",
+      caption: shortcode, title: shortcode,
+      timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems: [{
+        type: "video", url, thumbnail: null,
+        width: null, height: null, duration: null, ext: "mp4",
+        formats: [{ type: "video", quality: "HD", url, ext: "mp4" }],
+      }],
+      source: "direct-url",
+      warning: "Gagal mengambil halaman. Mungkin diblokir ISP. Coba gunakan VPN.",
+    };
+  }
+}
+
+/**
+ * Download video videy via Playwright untuk bypass ISP block
+ */
+async function downloadVideyViaPlaywright(pageUrl, cdnUrl) {
+  const { chromium } = require('playwright');
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    });
+    const page = await context.newPage();
+
+    // Block font/css untuk kecepatan
+    await page.route('**/*.{woff,woff2,ttf,css}', route => route.abort());
+
+    // Tangkap response video dari CDN
+    let videoResponse = null;
+    page.on('response', async (response) => {
+      const respUrl = response.url();
+      const ct = response.headers()['content-type'] || '';
+      if (ct.includes('video') || respUrl.includes('.mp4')) {
+        if (respUrl.includes('videy') || respUrl.includes('slicedrive')) {
+          videoResponse = response;
+        }
+      }
+    });
+
+    console.log(`[Playwright] Navigasi ke ${pageUrl}`);
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Tunggu video element dan trigger play
+    await page.waitForSelector('video', { timeout: 15000 }).catch(() => {});
+
+    // Trigger play untuk memulai loading video
+    await page.evaluate(() => {
+      const v = document.querySelector('video');
+      if (v) v.play().catch(() => {});
+    }).catch(() => {});
+
+    // Tunggu video response tertangkap
+    await page.waitForTimeout(3000);
+
+    // Jika video response tertangkap, download body-nya
+    if (videoResponse) {
+      const body = await videoResponse.body();
+      if (body && body.length > 1000) {
+        const tempDir = require('path').join(__dirname, 'temp_downloads');
+        if (!require('fs').existsSync(tempDir)) {
+          require('fs').mkdirSync(tempDir, { recursive: true });
+        }
+        const shortcode = new URL(pageUrl).searchParams.get('id') || 'videy';
+        const filename = `videy_${shortcode}_${Date.now()}.mp4`;
+        const filePath = require('path').join(tempDir, filename);
+        require('fs').writeFileSync(filePath, body);
+        console.log(`[Playwright] Video tersimpan: ${filename} (${(body.length / 1024 / 1024).toFixed(1)}MB)`);
+        return `/temp/${filename}`;
+      }
+    }
+
+    // Fallback: jika response tidak tertangkap, coba ambil dari <video> src
+    // dan download via browser evaluate
+    const videoUrl = await page.evaluate(() => {
+      const v = document.querySelector('video');
+      if (v) return v.src || (v.querySelector('source')?.src) || null;
+      return null;
+    }).catch(() => null);
+
+    if (videoUrl && videoUrl.startsWith('http')) {
+      // Coba download via browser fetch (bypass ISP block)
+      const buffer = await page.evaluate(async (url) => {
+        try {
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          return null;
+        }
+      }, videoUrl);
+
+      if (buffer && buffer.startsWith('data:')) {
+        const base64 = buffer.split(',')[1];
+        const buf = Buffer.from(base64, 'base64');
+        if (buf.length > 1000) {
+          const tempDir = require('path').join(__dirname, 'temp_downloads');
+          if (!require('fs').existsSync(tempDir)) {
+            require('fs').mkdirSync(tempDir, { recursive: true });
+          }
+          const shortcode = new URL(pageUrl).searchParams.get('id') || 'videy';
+          const filename = `videy_${shortcode}_${Date.now()}.mp4`;
+          const filePath = require('path').join(tempDir, filename);
+          require('fs').writeFileSync(filePath, buf);
+          console.log(`[Playwright] Video tersimpan via fetch: ${filename} (${(buf.length / 1024 / 1024).toFixed(1)}MB)`);
+          return `/temp/${filename}`;
+        }
+      }
+    }
+
+    throw new Error("Gagal menangkap video via Playwright");
+  } catch (err) {
+    throw new Error(`Playwright download gagal: ${err.message}`);
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 // ─── YouTube Fallback Functions (tanpa yt-dlp) ──────────────────────────────
 
 /**
@@ -4175,15 +4800,15 @@ async function scrapeYouTubeViaYtDlpDirect(url) {
     "--dump-single-json",
     "--no-warnings",
     "--no-playlist",
-    "--extractor-args", "youtube:player_client=tv_embedded;player_skip=webpage",
+    "--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage",
     "--no-check-certificates",
-    "--extractor-retries", "3",
+    "--extractor-retries", "5",
     "--sleep-interval", "2",
     "--max-sleep-interval", "5",
     cleanUrl
   ];
 
-  const raw = await runCommand("yt-dlp", infoArgs, 90000);
+  const raw = await runCommand("yt-dlp", infoArgs, 120000);
   const info = JSON.parse(raw);
 
   const title = info.title || "YouTube Video";
@@ -4655,54 +5280,81 @@ async function scrapeYouTubeViaPytube(url) {
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
 
+  const scriptPath = require("path").join(__dirname, "pytube_scraper.py");
+
+  // Coba beberapa varian perintah python
+  const pythonCandidates = process.platform === "win32"
+    ? ["python", "python3"]
+    : ["python3", "python"];
+
+  for (const pythonCmd of pythonCandidates) {
+    try {
+      return await runPytubeScript(pythonCmd, scriptPath, url, videoId);
+    } catch (err) {
+      // Jika python tidak ditemukan (ENOENT), coba kandidat berikutnya
+      if (err.message.includes("ENOENT") || err.message.includes("not found")) {
+        console.warn(`[YouTube] ${pythonCmd} tidak tersedia, coba ${pythonCandidates[pythonCandidates.indexOf(pythonCmd) + 1] || 'yang lain'}...`);
+        continue;
+      }
+      // Selain ENOENT, lempar error
+      throw err;
+    }
+  }
+  throw new Error("Tidak ada Python yang tersedia di sistem");
+}
+
+async function runPytubeScript(pythonCmd, scriptPath, url, videoId) {
+  const { execFile } = require("child_process");
+
   return new Promise((resolve, reject) => {
-    // Gunakan python3 karena Railway (Docker) menyediakan python3
-    const pythonCmd = process.platform === "win32" ? "python" : "python3";
-    const scriptPath = require("path").join(__dirname, "pytube_scraper.py");
-    
-    // Gunakan execFile
-    const { execFile } = require("child_process");
     execFile(pythonCmd, [scriptPath, url], { timeout: 30000 }, (error, stdout, stderr) => {
       if (error) {
-        return reject(new Error(`PyTube error: ${error.message}`));
+        // stderr sangat penting untuk debugging: tunjukkan output Python error
+        const stderrMsg = stderr ? ` | stderr: ${stderr.trim().substring(0, 500)}` : '';
+        return reject(new Error(`PyTube error (${pythonCmd}): ${error.message}${stderrMsg}`));
       }
-      
+
+      // Log stderr walau sukses (mungkin ada warning)
+      if (stderr) {
+        console.warn(`[YouTube] PyTube stderr: ${stderr.trim().substring(0, 200)}`);
+      }
+
       try {
         const data = JSON.parse(stdout);
         if (data.error) {
           return reject(new Error(`PyTube script error: ${data.error}`));
         }
-        
+
         if (!data.formats || data.formats.length === 0) {
           return reject(new Error("PyTube: tidak ada format tersedia"));
         }
-        
+
         const thumbnail = data.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
         const title = data.title || "YouTube Video";
         const author = data.author || "YouTube";
         const duration = data.duration || null;
-        
-        // formats is an array from the python script: {type, quality, url, ext, hasAudio}
+
         const validFormats = data.formats.filter(f => f.url && f.url.length > 10);
         if (validFormats.length === 0) {
           return reject(new Error("PyTube: format URL tidak valid"));
         }
-        
-        // Perbaikan: Ubah URL audio agar diproxy dan di-convert ke MP3 oleh server
-        // Ini menghindari error 403 (IP restriction) dan memastikan file terunduh sebagai MP3
+
+        // Route semua video URL melalui /api/yt-download (server-side proxy, hindari signed URL expire)
         for (const f of validFormats) {
-          if (f.type === "audio") {
+          if (f.type === "video") {
+            f.url = `/api/yt-download?videoId=${encodeURIComponent(videoId)}&formatId=${encodeURIComponent('pytube_' + (f.quality || 'best'))}`;
+            f.ext = f.ext || "mp4";
+          } else if (f.type === "audio") {
             f.url = `/api/extract-audio?url=${encodeURIComponent(f.url)}&filename=${encodeURIComponent('youtube_' + videoId + '.mp3')}`;
             f.ext = "mp3";
             f.quality = "Audio MP3";
           }
         }
-        
-        // Pisahkan menjadi main video item + formats array
+
         const bestVideo = validFormats.find(f => f.type === "video") || validFormats[0];
         const mainQuality = bestVideo.quality || "SD";
         const mainExt = bestVideo.ext || "mp4";
-        
+
         resolve({
           platform: "youtube",
           type: "video",
@@ -4728,7 +5380,7 @@ async function scrapeYouTubeViaPytube(url) {
           source: "pytube",
           warning: bestVideo.hasAudio === false ? "Video only, no audio" : null
         });
-        
+
       } catch (parseErr) {
         console.warn("[YouTube] PyTube parse error stdout:", stdout.substring(0, 200));
         reject(new Error(`PyTube parse error: ${parseErr.message}`));
@@ -5342,14 +5994,24 @@ async function getYouTubeMetadata(url) {
 }
 
 /**
- * Fungsi utama scraping YouTube dengan multiple fallback tanpa yt-dlp.
- * Urutan: yt-dlp → Cobalt → Siputzx → Y2Mate → SaveFrom → SSYouTube
+ * Fungsi utama scraping YouTube dengan multiple fallback.
+ * Urutan: PyTube (pytubefix) → yt-dlp → Cobalt → Siputzx → Y2Mate → SaveFrom → SSYouTube
  */
 async function scrapeYouTube(url, ytdlpAvailable = false) {
   const errors = [];
 
-  // Method 1: yt-dlp mode YouTube Direct (opsi khusus YouTube, bypass bot detection)
-  // Ini paling andal — gunakan android + web player client untuk hindari "Sign in to confirm"
+  // Method 1: PyTube (pytubefix) — gunakan link langsung, paling andal karena tidak kena bot detection yt-dlp
+  try {
+    const result = await scrapeYouTubeViaPytube(url);
+    console.log("[YouTube] \u2705 Berhasil via PyTube");
+    return result;
+  } catch (err) {
+    console.warn(`[YouTube] PyTube gagal: ${err.message}`);
+    errors.push(`PyTube: ${err.message}`);
+  }
+
+  // Method 2: yt-dlp mode YouTube Direct (opsi khusus YouTube, bypass bot detection)
+  // Fallback jika PyTube gagal — gunakan player_client khusus untuk hindari "Sign in to confirm"
   if (ytdlpAvailable) {
     try {
       const result = await scrapeYouTubeViaYtDlpDirect(url);
@@ -5357,7 +6019,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
         (item) => item.url && item.url.length > 10
       );
       if (hasValidMedia) {
-        console.log("[YouTube] ✅ Berhasil via yt-dlp direct");
+        console.log("[YouTube] \u2705 Berhasil via yt-dlp direct");
         return result;
       }
       throw new Error("yt-dlp mengembalikan URL media kosong");
@@ -5367,7 +6029,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
     }
   }
 
-  // Method 2: yt-dlp standar (tanpa opsi khusus) — fallback jika mode direct gagal
+  // Method 3: yt-dlp standar (tanpa opsi khusus) — fallback jika mode direct gagal
   if (ytdlpAvailable) {
     try {
       const result = await scrapeViaYtDlp(url, "youtube");
@@ -5375,7 +6037,7 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
         (item) => item.url && item.url.length > 10
       );
       if (hasValidMedia) {
-        console.log("[YouTube] ✅ Berhasil via yt-dlp standar");
+        console.log("[YouTube] \u2705 Berhasil via yt-dlp standar");
         return result;
       }
       throw new Error("yt-dlp mengembalikan URL media kosong");
@@ -5383,16 +6045,6 @@ async function scrapeYouTube(url, ytdlpAvailable = false) {
       console.warn(`[YouTube] yt-dlp standar gagal: ${err.message.substring(0, 120)}`);
       errors.push(`yt-dlp: ${err.message.substring(0, 80)}`);
     }
-  }
-
-  // Method 2.5: PyTube (pytubefix)
-  try {
-    const result = await scrapeYouTubeViaPytube(url);
-    console.log("[YouTube] ✅ Berhasil via PyTube");
-    return result;
-  } catch (err) {
-    console.warn(`[YouTube] PyTube gagal: ${err.message}`);
-    errors.push(`PyTube: ${err.message}`);
   }
 
   // Method 3: Cobalt API v10 (open-source, public instances, tidak butuh key)
@@ -6301,7 +6953,7 @@ async function scrapeMedia(url) {
   if (!detected) {
     throw new Error(
       "URL tidak valid atau platform tidak didukung. " +
-      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook."
+      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, Vizey, Slicidrive, Bokepbox, Bokepbox TV."
     );
   }
 
@@ -6647,6 +7299,95 @@ async function scrapeMedia(url) {
   }
 
   // Pinterest: Gunakan yt-dlp langsung (work dengan baik untuk Pinterest)
+  // Viday & Videy: Scrape HTML untuk video URL
+  if (platform === "viday" || platform === "videy") {
+    try {
+      const result = await scrapeVidayVidey(url, platform);
+      console.log(`[Scraper] ${platform} berhasil (${result.mediaItems.length} video)`);
+      return result;
+    } catch (err) {
+      console.warn(`[Scraper] ${platform} gagal: ${err.message}`);
+      // Fallback ke Playwright untuk videy jika kena 403 (WAF/ISP block)
+      if (platform === "videy" && (String(err.message).includes("403") || String(err.message).includes("401"))) {
+        try {
+          console.log(`[Scraper] Mencoba fallback Playwright untuk ${platform}...`);
+          const tempPath = await downloadVideyViaPlaywright(url);
+          const shortcode = new URL(url).searchParams.get('id') || url.split('/').pop().replace(/\?.*/, '') || "videy";
+          return {
+            platform,
+            type: "video",
+            shortcode,
+            author: platform,
+            caption: `Videy ${shortcode}`,
+            title: `Videy ${shortcode}`,
+            timestamp: null,
+            likeCount: 0,
+            commentCount: 0,
+            viewCount: 0,
+            duration: null,
+            mediaItems: [{
+              type: "video",
+              url: tempPath,
+              thumbnail: null,
+              width: null,
+              height: null,
+              duration: null,
+              ext: "mp4",
+              formats: [{ type: "video", quality: "HD", url: tempPath, ext: "mp4" }],
+            }],
+            source: "playwright-fallback",
+            warning: "Video diambil via Playwright (fallback). Mungkin lebih lambat.",
+          };
+        } catch (pwErr) {
+          console.warn(`[Scraper] Fallback Playwright juga gagal: ${pwErr.message}`);
+          throw new Error(`${platform} download gagal: ${err.message}`);
+        }
+      }
+      throw new Error(`${platform} download gagal: ${err.message}`);
+    }
+  }
+
+  if (platform === "bokepbox") {
+    try {
+      const result = await scrapeBokepbox(url);
+      console.log(`[Scraper] bokepbox berhasil`);
+      return result;
+    } catch (err) {
+      console.warn(`[Scraper] bokepbox gagal: ${err.message}`);
+      throw new Error(`bokepbox download gagal: ${err.message}`);
+    }
+  }
+
+  // Vizey & Slicidrive: URL video langsung dari CDN, tanpa scraping HTML
+  if (platform === "vizey" || platform === "slicidrive") {
+    const filename = url.split('/').pop().replace(/\.mp4.*/i, '') || "video";
+    return {
+      platform,
+      type: "video",
+      shortcode: filename,
+      author: platform === "vizey" ? "Vizey" : "Slicidrive",
+      caption: filename,
+      title: filename,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems: [{
+        type: "video",
+        url: url,
+        thumbnail: url,
+        width: null,
+        height: null,
+        duration: null,
+        ext: "mp4",
+        formats: [{ type: "video", quality: "HD", url: url, ext: "mp4" }],
+      }],
+      source: "direct-cdn",
+      warning: null,
+    };
+  }
+
   if (platform === "pinterest") {
     try {
       const pinterestResult = await scrapePinterest(url);
@@ -6803,136 +7544,126 @@ async function scrapeTikTokStoriesByUsername(username) {
 
   console.log(`[Scraper] Mengambil TikTok Stories untuk @${username}...`);
 
-  // ─── Metode 1: TikWM API ───
-  try {
-    console.log(`[Scraper] Mencoba TikWM API untuk stories @${username}...`);
-    const apiUrl = `https://www.tikwm.com/api/user/stories?unique_id=${encodeURIComponent(username)}`;
-    const response = await axios.get(apiUrl, {
-      timeout: 15000,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-      },
-    });
-
-    const data = response.data;
-    if (data && data.code === 0 && data.data && Array.isArray(data.data) && data.data.length > 0) {
-      const mediaItems = [];
-
-      data.data.forEach((story, index) => {
-        if (story.video_url || story.play) {
-          // Video story
-          mediaItems.push({
-            type: 'video',
-            url: story.video_url || story.play,
-            thumbnail: story.cover || story.origin_cover || story.video_url,
-            width: null,
-            height: null,
-            duration: story.duration || null,
-            ext: 'mp4',
-            formats: [
-              { type: 'video', quality: `Story ${index + 1}`, url: story.video_url || story.play, ext: 'mp4' },
-            ],
-          });
-        } else if (story.image_url || story.images) {
-          // Image story
-          const images = story.images || [story.image_url];
-          images.forEach((imgUrl, imgIdx) => {
-            if (imgUrl) {
-              mediaItems.push({
-                type: 'image',
-                url: imgUrl,
-                thumbnail: imgUrl,
-                width: null,
-                height: null,
-                duration: null,
-                ext: 'jpg',
-                formats: [
-                  { type: 'image', quality: `Story ${index + 1}${images.length > 1 ? ` (${imgIdx + 1})` : ''}`, url: imgUrl, ext: 'jpg' },
-                ],
-              });
-            }
-          });
-        }
-      });
-
-      if (mediaItems.length > 0) {
-        console.log(`[Scraper] TikWM: Ditemukan ${mediaItems.length} stories untuk @${username}`);
-        return {
-          platform: 'tiktok',
-          type: mediaItems.length > 1 ? 'playlist' : mediaItems[0].type,
-          shortcode: '',
-          author: username,
-          caption: `TikTok Stories dari @${username}`,
-          title: `TikTok Stories @${username}`,
-          timestamp: null,
-          likeCount: 0,
-          commentCount: 0,
-          viewCount: 0,
-          duration: null,
-          mediaItems: mediaItems.slice(0, 20),
-          source: 'tikwm_stories',
-          warning: null,
-        };
-      }
+  // ─── Helper: proses item story TikWM ───
+  function parseTikWMItem(item) {
+    if (item.images && item.images.length > 0) {
+      return item.images.map((imgUrl, imgIdx) => ({
+        type: 'image', url: imgUrl, thumbnail: imgUrl, width: null, height: null, duration: null, ext: 'jpg',
+        formats: [{ type: 'image', quality: `Foto ${imgIdx + 1}`, url: imgUrl, ext: 'jpg' }],
+      }));
     }
-    console.warn(`[Scraper] TikWM stories API: tidak ada data untuk @${username}`);
-  } catch (err) {
-    console.warn(`[Scraper] TikWM stories API gagal: ${err.message}`);
+    if (item.play) {
+      return [{
+        type: 'video', url: item.play, thumbnail: item.cover || item.origin_cover || item.play,
+        width: null, height: null, duration: item.duration || null, ext: 'mp4',
+        formats: [
+          { type: 'video', quality: 'No Watermark', url: item.play, ext: 'mp4' },
+          { type: 'video', quality: 'Watermark', url: item.wmplay || item.play, ext: 'mp4' },
+          ...(item.music ? [{ type: 'audio', quality: 'Audio', url: item.music, ext: 'mp3' }] : []),
+        ],
+      }];
+    }
+    return [];
   }
 
-  // ─── Metode 2: yt-dlp dengan URL profil ───
+  function buildResult(mediaItems, source, warning) {
+    return {
+      platform: 'tiktok', type: 'playlist', shortcode: '',
+      author: username, caption: `TikTok Stories dari @${username}`,
+      title: `TikTok Stories @${username}`, timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems: mediaItems.slice(0, 20), source,
+      warning,
+    };
+  }
+
+  // ─── Metode 1: TikWM user/story API (stories ASLI, terbukti hidup) ───
+  try {
+    console.log(`[Scraper] Mencoba TikWM story API untuk @${username}...`);
+    const allMedia = [];
+    let cursor = '0';
+    let hasMore = false;
+    do {
+      const resp = await axios.get(`https://www.tikwm.com/api/user/story?unique_id=${encodeURIComponent(username)}&count=30&cursor=${cursor}`, {
+        timeout: 15000,
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      });
+      if (resp.data?.code !== 0) break;
+      const items = resp.data.data?.videos;
+      if (!items?.length) break;
+      allMedia.push(...items.flatMap(parseTikWMItem));
+      cursor = resp.data.data?.cursor || '0';
+      hasMore = !!resp.data.data?.hasMore;
+    } while (hasMore && cursor && cursor !== '0' && allMedia.length < 50);
+    if (allMedia.length > 0) {
+      console.log(`[Scraper] ✅ TikTok stories: ${allMedia.length} item untuk @${username}`);
+      return buildResult(allMedia, 'tikwm_story', null);
+    }
+    console.warn(`[Scraper] TikWM story: tidak ada story aktif untuk @${username}`);
+  } catch (err) {
+    console.warn(`[Scraper] TikWM story API gagal: ${err.message}`);
+  }
+
+  // ─── Metode 2: TikWM user/posts (postingan biasa, fallback) ───
+  try {
+    console.log(`[Scraper] Mencoba TikWM user posts (fallback) untuk @${username}...`);
+    const resp = await axios.get(`https://www.tikwm.com/api/user/posts?unique_id=${encodeURIComponent(username)}&count=20`, {
+      timeout: 15000,
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    });
+    if (resp.data?.code === 0 && resp.data?.data?.videos?.length > 0) {
+      const mediaItems = resp.data.data.videos.flatMap(parseTikWMItem);
+      if (mediaItems.length > 0) {
+        console.log(`[Scraper] ✅ TikWM posts: ${mediaItems.length} konten dari @${username}`);
+        return buildResult(mediaItems, 'tikwm_posts', 'Tidak ada story aktif. Menampilkan postingan terbaru.');
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] TikWM user posts gagal: ${err.message}`);
+  }
+
+  // ─── Metode 3: yt-dlp profil ───
   const ytdlpAvailable = await checkYtDlp();
   if (ytdlpAvailable) {
     try {
-      console.log(`[Scraper] Mencoba yt-dlp untuk stories @${username}...`);
-      const profileUrl = `https://www.tiktok.com/@${username}`;
-      const args = [
-        '--dump-single-json',
-        '--no-warnings',
-        '--playlist-end', '20',
+      console.log(`[Scraper] Mencoba yt-dlp untuk @${username}...`);
+      const raw = await runCommand('yt-dlp', [
+        '--dump-single-json', '--no-warnings', '--playlist-end', '20',
         '--add-header', 'User-Agent:Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-        profileUrl,
-      ];
-
-      const raw = await runCommand('yt-dlp', args, 60000);
+        `https://www.tiktok.com/@${username}`,
+      ], 60000);
       const info = JSON.parse(raw);
       const result = parseYtDlpOutput(info, 'tiktok');
       result.title = `TikTok @${username}`;
       result.author = username;
       result.caption = `Konten dari @${username}`;
-
       if (result.mediaItems.length > 0) {
-        console.log(`[Scraper] yt-dlp: Ditemukan ${result.mediaItems.length} konten dari @${username}`);
+        console.log(`[Scraper] ✅ yt-dlp: ${result.mediaItems.length} konten dari @${username}`);
+        result.warning = 'Tidak ada story aktif. Menampilkan postingan terbaru.';
         return result;
       }
     } catch (err) {
-      console.warn(`[Scraper] yt-dlp stories gagal: ${err.message}`);
+      console.warn(`[Scraper] yt-dlp gagal: ${err.message}`);
     }
 
-    // ─── Metode 2b: yt-dlp dengan cookies browser ───
     try {
       const browsers = ['chrome', 'edge', 'firefox', 'brave'];
       for (const browser of browsers) {
         try {
-          const profileUrl = `https://www.tiktok.com/@${username}`;
-          const args = [
-            '--dump-single-json',
-            '--no-warnings',
-            '--playlist-end', '20',
+          const raw = await runCommand('yt-dlp', [
+            '--dump-single-json', '--no-warnings', '--playlist-end', '20',
             '--cookies-from-browser', browser,
             '--add-header', 'User-Agent:Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-            profileUrl,
-          ];
-          const raw = await runCommand('yt-dlp', args, 60000);
+            `https://www.tiktok.com/@${username}`,
+          ], 60000);
           const info = JSON.parse(raw);
           const result = parseYtDlpOutput(info, 'tiktok');
           result.title = `TikTok @${username}`;
           result.author = username;
           result.caption = `Konten dari @${username}`;
-
           if (result.mediaItems.length > 0) {
-            console.log(`[Scraper] yt-dlp (cookies ${browser}): Ditemukan ${result.mediaItems.length} konten`);
+            console.log(`[Scraper] ✅ yt-dlp (cookies ${browser}): ${result.mediaItems.length} konten`);
+            result.warning = 'Tidak ada story aktif. Menampilkan postingan terbaru.';
             return result;
           }
         } catch (e) {
@@ -6944,78 +7675,714 @@ async function scrapeTikTokStoriesByUsername(username) {
     }
   }
 
-  // ─── Metode 3: TikWM user posts sebagai alternatif ───
+  throw new Error(
+    `Gagal mengambil konten TikTok dari @${username}. ` +
+    `Pastikan username benar, akun publik, dan memiliki konten aktif.`
+  );
+}
+
+/**
+ * Mengambil semua video dalam YouTube Playlist menggunakan yt-dlp.
+ *
+ * @param {string} url - URL playlist YouTube
+ * @returns {Promise<object>} Data playlist
+ */
+async function scrapeYouTubePlaylist(url) {
+  console.log(`[Scraper] Mengambil YouTube Playlist: ${url}`);
+
+  const videoId = extractYouTubeVideoId(url);
+  const listMatch = url.match(/[?&]list=([A-Za-z0-9_-]+)/);
+  const listId = listMatch ? listMatch[1] : null;
+
+  if (!listMatch) {
+    throw new Error("URL bukan playlist YouTube yang valid. Pastikan mengandung parameter ?list=...");
+  }
+
   try {
-    console.log(`[Scraper] Mencoba TikWM user posts untuk @${username}...`);
-    const apiUrl = `https://www.tikwm.com/api/user/posts?unique_id=${encodeURIComponent(username)}&count=20`;
-    const response = await axios.get(apiUrl, {
-      timeout: 15000,
+    const raw = await runCommand('yt-dlp', [
+      '--flat-playlist',
+      '--dump-single-json',
+      '--no-warnings',
+      '--playlist-end', '100',
+      '--extractor-args', 'youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage',
+      '--extractor-retries', '5',
+      url,
+    ], 120000);
+
+    const info = JSON.parse(raw);
+    const entries = info.entries || [];
+    if (entries.length === 0) {
+      throw new Error("Playlist kosong atau tidak dapat diakses.");
+    }
+
+    const mediaItems = [];
+    for (const entry of entries) {
+      if (entry.url || entry.id) {
+        const vidId = entry.id || extractYouTubeVideoId(entry.url);
+        const vidUrl = entry.url || `https://www.youtube.com/watch?v=${vidId}`;
+        const downloadUrl = `/api/yt-download?videoId=${encodeURIComponent(vidId)}&formatId=best`;
+        const thumbnailUrl = entry.thumbnails?.[0]?.url || entry.thumbnail || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+        mediaItems.push({
+          type: 'video',
+          url: downloadUrl,
+          thumbnail: thumbnailUrl,
+          width: null,
+          height: null,
+          duration: entry.duration || null,
+          ext: 'mp4',
+          title: entry.title || `Video ${mediaItems.length + 1}`,
+          pageUrl: vidUrl,
+          formats: [
+            { type: 'video', quality: 'Best', url: downloadUrl, ext: 'mp4' },
+          ],
+        });
+      }
+    }
+
+    console.log(`[Scraper] ✅ YouTube Playlist: ${mediaItems.length} video`);
+    return {
+      platform: 'youtube',
+      type: 'playlist',
+      shortcode: '',
+      author: info.uploader || info.channel || 'YouTube',
+      caption: `Playlist: ${info.title || ''}`,
+      title: info.title || 'YouTube Playlist',
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems,
+      source: 'ytdlp_playlist',
+      warning: mediaItems.length >= 100 ? 'Maksimal 100 video diambil. Playlist mungkin memiliki lebih banyak video.' : null,
+    };
+  } catch (err) {
+    console.warn(`[Scraper] yt-dlp playlist gagal: ${err.message}`);
+    throw new Error(`Gagal mengambil playlist YouTube: ${err.message}`);
+  }
+}
+
+/**
+ * Mengambil postingan Instagram berdasarkan username.
+ * Menggunakan yt-dlp untuk scraping profil Instagram.
+ *
+ * @param {string} username - Username Instagram (tanpa @)
+ * @param {number} count - Jumlah postingan yang diambil (default 12, max 30)
+ * @param {string} mediaType - "image", "video", atau "all" (default "all")
+ * @returns {Promise<object>} Data postingan
+ */
+async function scrapeInstagramPostsByUsername(username, count = 12, mediaType = 'all') {
+  username = username.replace(/^@/, '').trim();
+  if (!username || username.length < 2) {
+    throw new Error("Username Instagram tidak valid.");
+  }
+
+  count = Math.min(Math.max(parseInt(count) || 12, 1), 30);
+  console.log(`[Scraper] Mengambil ${count} postingan Instagram dari @${username} (filter: ${mediaType})...`);
+
+  // Helper: cari file cookies yang tersedia
+  function findCookieFiles() {
+    const cookiesDir = path.join(__dirname, 'cookies');
+    if (fs.existsSync(cookiesDir)) {
+      const files = fs.readdirSync(cookiesDir).filter(f => f.endsWith('.txt') || f.endsWith('.json'));
+      return files.map(f => path.join(cookiesDir, f));
+    }
+    return [];
+  }
+
+  function applyFilter(result) {
+    if (mediaType === 'image') {
+      result.mediaItems = result.mediaItems.filter(item => item.type === 'image');
+    } else if (mediaType === 'video') {
+      result.mediaItems = result.mediaItems.filter(item => item.type === 'video');
+    }
+    return result;
+  }
+
+  const profileUrl = `https://www.instagram.com/${username}/`;
+
+  // Method 1: yt-dlp dengan cookies (jika tersedia)
+  const cookieFiles = findCookieFiles();
+  if (cookieFiles.length > 0) {
+    for (const cookieFile of cookieFiles) {
+      try {
+        console.log(`[Scraper] Mencoba yt-dlp Instagram profile dengan cookies: ${path.basename(cookieFile)}...`);
+        const raw = await runCommand('yt-dlp', [
+          '--dump-single-json', '--no-warnings',
+          '--playlist-end', String(count),
+          '--cookies', cookieFile,
+          '--extractor-args', 'instagram:direct_video_url=true',
+          '--add-header', `User-Agent:${IG_USER_AGENT}`,
+          profileUrl,
+        ], 90000);
+        const info = JSON.parse(raw);
+        const result = parseYtDlpOutput(info, 'instagram');
+        if (result.mediaItems.length > 0) {
+          result.title = `Instagram @${username}`;
+          result.author = username;
+          result.caption = `${count} postingan terbaru dari @${username}`;
+          applyFilter(result);
+          if (result.mediaItems.length > 0) {
+            console.log(`[Scraper] ✅ Instagram posts (yt-dlp+cookies): ${result.mediaItems.length} item`);
+            return result;
+          }
+        }
+      } catch (err) {
+        console.warn(`[Scraper] yt-dlp+cookies gagal (${path.basename(cookieFile)}): ${err.message.substring(0, 80)}`);
+      }
+    }
+  }
+
+  // Method 2: yt-dlp tanpa cookies
+  try {
+    console.log(`[Scraper] Mencoba yt-dlp Instagram profile tanpa cookies...`);
+    const raw = await runCommand('yt-dlp', [
+      '--dump-single-json', '--no-warnings',
+      '--playlist-end', String(count),
+      '--extractor-args', 'instagram:direct_video_url=true',
+      '--add-header', `User-Agent:${IG_USER_AGENT}`,
+      profileUrl,
+    ], 90000);
+    const info = JSON.parse(raw);
+    const result = parseYtDlpOutput(info, 'instagram');
+    if (result.mediaItems.length > 0) {
+      result.title = `Instagram @${username}`;
+      result.author = username;
+      result.caption = `${count} postingan terbaru dari @${username}`;
+      applyFilter(result);
+      if (result.mediaItems.length > 0) {
+        console.log(`[Scraper] ✅ Instagram posts (yt-dlp): ${result.mediaItems.length} item`);
+        return result;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] yt-dlp Instagram profile gagal: ${err.message.substring(0, 80)}`);
+  }
+
+  // Method 3: Instagram public web_profile_info API (mobile endpoint)
+  try {
+    console.log(`[Scraper] Mencoba Instagram mobile API untuk @${username}...`);
+    const wpResp = await axios.get(
+      `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+      {
+        headers: {
+          'User-Agent': 'Instagram 219.0.0.12.117 Android',
+          'Accept': 'application/json',
+        },
+        timeout: 15000,
+        validateStatus: s => s === 200,
+      }
+    );
+    const userData = wpResp.data?.data?.user;
+    if (userData && userData.id) {
+      const userId = userData.id;
+      console.log(`[Scraper] Mobile API OK, user ID: ${userId}, media_count: ${userData.media_count}`);
+
+      // Dapatkan postingan via graphql
+      const queryHash = '69cba40317214236af40e7efa697781d';
+      const variables = JSON.stringify({
+        id: userId,
+        first: Math.min(count, 12),
+      });
+
+      const gqlResp = await axios.get(
+        `https://www.instagram.com/graphql/query/?query_hash=${queryHash}&variables=${encodeURIComponent(variables)}`,
+        {
+          headers: {
+            'User-Agent': IG_USER_AGENT,
+            'Accept': 'application/json',
+            'X-IG-App-ID': IG_APP_ID,
+          },
+          timeout: 20000,
+          validateStatus: s => s === 200,
+        }
+      );
+
+      const edges = gqlResp.data?.data?.user?.edge_owner_to_timeline_media?.edges || [];
+      if (edges.length > 0) {
+        const items = [];
+        for (const edge of edges) {
+          const node = edge.node;
+          const isVideo = node.is_video;
+          if (node.edge_sidecar_to_children) {
+            for (const child of node.edge_sidecar_to_children.edges) {
+              const cn = child.node;
+              items.push({
+                type: cn.is_video ? 'video' : 'image',
+                url: cn.is_video ? (cn.video_url || cn.display_url) : cn.display_url,
+                thumbnail: cn.display_url,
+                width: cn.dimensions?.width, height: cn.dimensions?.height,
+                duration: cn.video_duration || null,
+                ext: cn.is_video ? 'mp4' : 'jpg',
+                formats: [{ type: cn.is_video ? 'video' : 'image', quality: 'HD', url: cn.is_video ? (cn.video_url || cn.display_url) : cn.display_url, ext: cn.is_video ? 'mp4' : 'jpg' }],
+              });
+            }
+          } else {
+            items.push({
+              type: isVideo ? 'video' : 'image',
+              url: isVideo ? (node.video_url || node.display_url) : node.display_url,
+              thumbnail: node.display_url,
+              width: node.dimensions?.width, height: node.dimensions?.height,
+              duration: node.video_duration || null,
+              ext: isVideo ? 'mp4' : 'jpg',
+              formats: [{ type: isVideo ? 'video' : 'image', quality: 'HD', url: isVideo ? (node.video_url || node.display_url) : node.display_url, ext: isVideo ? 'mp4' : 'jpg' }],
+            });
+          }
+        }
+
+        if (items.length > 0) {
+          const result = {
+            platform: 'instagram', type: 'playlist', shortcode: '',
+            author: username,
+            caption: `${count} postingan terbaru dari @${username}`,
+            title: `Instagram @${username}`, timestamp: null,
+            likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: items, source: 'instagram_graphql',
+          };
+          applyFilter(result);
+          if (result.mediaItems.length > 0) {
+            console.log(`[Scraper] ✅ Instagram posts (GraphQL): ${result.mediaItems.length} item`);
+            return result;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] Instagram mobile API gagal: ${err.message.substring(0, 80)}`);
+  }
+
+  // Method 4: Instagram __a=1 public JSON endpoint
+  try {
+    console.log(`[Scraper] Mencoba Instagram __a=1 endpoint untuk @${username}...`);
+    const a1Resp = await axios.get(
+      `https://www.instagram.com/${encodeURIComponent(username)}/?__a=1&__d=1`,
+      {
+        headers: {
+          'User-Agent': IG_USER_AGENT,
+          'Accept': 'application/json',
+          'X-IG-App-ID': IG_APP_ID,
+        },
+        timeout: 15000,
+        validateStatus: s => s === 200,
+      }
+    );
+
+    const prof = a1Resp.data?.graphql?.user;
+    if (prof) {
+      const edges = prof.edge_owner_to_timeline_media?.edges || [];
+      if (edges.length > 0) {
+        const parseEdge = (node) => {
+          const isV = node.is_video;
+          const items = [];
+          if (node.edge_sidecar_to_children) {
+            for (const child of node.edge_sidecar_to_children.edges) {
+              const cn = child.node;
+              items.push({
+                type: cn.is_video ? 'video' : 'image',
+                url: cn.is_video ? (cn.video_url || cn.display_url) : cn.display_url,
+                thumbnail: cn.display_url,
+                width: cn.dimensions?.width, height: cn.dimensions?.height,
+                duration: cn.video_duration || null,
+                ext: cn.is_video ? 'mp4' : 'jpg',
+                formats: [{ type: cn.is_video ? 'video' : 'image', quality: 'HD', url: cn.is_video ? (cn.video_url || cn.display_url) : cn.display_url, ext: cn.is_video ? 'mp4' : 'jpg' }],
+              });
+            }
+          } else {
+            items.push({
+              type: isV ? 'video' : 'image',
+              url: isV ? (node.video_url || node.display_url) : node.display_url,
+              thumbnail: node.display_url,
+              width: node.dimensions?.width, height: node.dimensions?.height,
+              duration: node.video_duration || null,
+              ext: isV ? 'mp4' : 'jpg',
+              formats: [{ type: isV ? 'video' : 'image', quality: 'HD', url: isV ? (node.video_url || node.display_url) : node.display_url, ext: isV ? 'mp4' : 'jpg' }],
+            });
+          }
+          return items;
+        };
+
+        const items = [];
+        for (const edge of edges) {
+          items.push(...parseEdge(edge.node));
+          if (items.length >= count) break;
+        }
+
+        if (items.length > 0) {
+          const result = {
+            platform: 'instagram', type: 'playlist', shortcode: '',
+            author: username, caption: `${count} postingan terbaru dari @${username}`,
+            title: `Instagram @${username}`, timestamp: null,
+            likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: items, source: 'instagram_a1',
+          };
+          applyFilter(result);
+          if (result.mediaItems.length > 0) {
+            console.log(`[Scraper] ✅ Instagram posts (__a=1): ${result.mediaItems.length} item`);
+            return result;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] Instagram __a=1 gagal: ${err.message.substring(0, 80)}`);
+  }
+
+  // Method 6: igram.world profile scraping
+  try {
+    console.log(`[Scraper] Mencoba igram.world untuk profil @${username}...`);
+    const iResp = await axios.post(
+      "https://igram.world/api/convert",
+      JSON.stringify({ url: profileUrl, lang: "id" }),
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Content-Type": "application/json",
+          "Origin": "https://igram.world",
+          "Referer": "https://igram.world/",
+        },
+        timeout: 15000,
+      }
+    );
+    const data = iResp.data;
+    if (data?.media && Array.isArray(data.media) && data.media.length > 0) {
+      const items = data.media.map((item, i) => ({
+        type: (item.type === 'video' || (item.url || '').includes('.mp4')) ? 'video' : 'image',
+        url: item.url,
+        thumbnail: item.thumbnail || item.url,
+        width: null, height: null, duration: null,
+        ext: (item.type === 'video' || (item.url || '').includes('.mp4')) ? 'mp4' : 'jpg',
+        formats: [{ type: (item.type === 'video' || (item.url || '').includes('.mp4')) ? 'video' : 'image', quality: `Media ${i + 1}`, url: item.url, ext: (item.type === 'video' || (item.url || '').includes('.mp4')) ? 'mp4' : 'jpg' }],
+      }));
+      const result = {
+        platform: 'instagram', type: 'playlist', shortcode: '',
+        author: username, caption: `${count} postingan terbaru dari @${username}`,
+        title: `Instagram @${username}`, timestamp: null,
+        likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+        mediaItems: items, source: 'igram_profile',
+      };
+      applyFilter(result);
+      if (result.mediaItems.length > 0) {
+        console.log(`[Scraper] ✅ Instagram posts (igram): ${result.mediaItems.length} item`);
+        return result;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] igram profile gagal: ${err.message.substring(0, 80)}`);
+  }
+
+  // Method 7: RapidAPI Instagram scraper
+  try {
+    console.log(`[Scraper] Mencoba RapidAPI untuk profil @${username}...`);
+    const rapidResp = await axios.get(
+      `https://instagram-post-reels-stories-downloader-api.p.rapidapi.com/instagram/`,
+      {
+        params: { url: profileUrl },
+        headers: {
+          'x-rapidapi-host': 'instagram-post-reels-stories-downloader-api.p.rapidapi.com',
+          'x-rapidapi-key': '29be28c9fbmsh38d097de4f364c3p10b509jsn3a0f41eb7e83',
+        },
+        timeout: 20000,
+        validateStatus: s => s === 200,
+      }
+    );
+    const data = rapidResp.data;
+    if (data?.result && Array.isArray(data.result)) {
+      const items = data.result.map((item, i) => ({
+        type: (item.type || '').includes('video') ? 'video' : 'image',
+        url: item.url,
+        thumbnail: item.url,
+        width: null, height: null, duration: null,
+        ext: (item.type || '').includes('video') ? 'mp4' : 'jpg',
+        formats: [{ type: (item.type || '').includes('video') ? 'video' : 'image', quality: `Media ${i + 1}`, url: item.url, ext: (item.type || '').includes('video') ? 'mp4' : 'jpg' }],
+      }));
+      if (items.length > 0) {
+        const result = {
+          platform: 'instagram', type: 'playlist', shortcode: '',
+          author: username, caption: `${count} postingan terbaru dari @${username}`,
+          title: `Instagram @${username}`, timestamp: null,
+          likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+          mediaItems: items, source: 'rapidapi',
+        };
+        applyFilter(result);
+        if (result.mediaItems.length > 0) {
+          console.log(`[Scraper] ✅ Instagram posts (RapidAPI): ${result.mediaItems.length} item`);
+          return result;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] RapidAPI profile gagal: ${err.message.substring(0, 80)}`);
+  }
+
+  // Method 8: Instaloader Python
+  try {
+    console.log(`[Scraper] Mencoba Instaloader Python untuk @${username}...`);
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const scriptPath = path.join(__dirname, 'instaloader_scraper.py');
+
+    // Tulis script temporary
+    const scriptContent = `import sys, json
+try:
+    from instaloader import Instaloader, Profile
+except:
+    print(json.dumps({"error": "instaloader tidak terinstall"}), file=sys.stderr)
+    sys.exit(1)
+
+username = sys.argv[1]
+count = int(sys.argv[2])
+L = Instaloader(quiet=True, download_comments=False, save_metadata=False)
+
+try:
+    profile = Profile.from_username(L.context, username)
+    posts = []
+    for post in profile.get_posts():
+        if len(posts) >= count:
+            break
+        item = {
+            "shortcode": post.shortcode,
+            "type": "video" if post.is_video else "image",
+            "url": post.video_url if post.is_video else post.url,
+            "thumbnail": post.url,
+            "caption": (post.caption or "")[:200],
+            "timestamp": str(post.date_local) if post.date_local else None,
+        }
+        if post.typename == "GraphSidecar":
+            sidecar_items = []
+            try:
+                for node in post.get_sidecar_nodes():
+                    sidecar_items.append({
+                        "type": "video" if node.is_video else "image",
+                        "url": node.video_url if node.is_video else node.display_url,
+                        "thumbnail": node.display_url,
+                    })
+            except:
+                pass
+            if sidecar_items:
+                item["sidecar"] = sidecar_items
+        posts.append(item)
+    
+    print(json.dumps({"username": username, "count": len(posts), "posts": posts}))
+except Exception as e:
+    print(json.dumps({"error": str(e)}), file=sys.stderr)
+    sys.exit(1)
+`;
+    fs.writeFileSync(scriptPath, scriptContent);
+
+    const raw = await runCommand(pythonCmd, [scriptPath, username, String(count)], 120000);
+    const result = JSON.parse(raw);
+
+    // Cleanup script
+    try { fs.unlinkSync(scriptPath); } catch(_) {}
+
+    if (result.error) throw new Error(result.error);
+
+    const mediaItems = [];
+    for (const post of result.posts) {
+      if (post.sidecar && post.sidecar.length > 0) {
+        for (const s of post.sidecar) {
+          mediaItems.push({
+            type: s.type, url: s.url, thumbnail: s.thumbnail,
+            width: null, height: null, duration: null,
+            ext: s.type === 'video' ? 'mp4' : 'jpg',
+            formats: [{ type: s.type, quality: 'HD', url: s.url, ext: s.type === 'video' ? 'mp4' : 'jpg' }],
+          });
+        }
+      } else {
+        mediaItems.push({
+          type: post.type, url: post.url, thumbnail: post.thumbnail,
+          width: null, height: null, duration: null,
+          ext: post.type === 'video' ? 'mp4' : 'jpg',
+          formats: [{ type: post.type, quality: 'HD', url: post.url, ext: post.type === 'video' ? 'mp4' : 'jpg' }],
+        });
+      }
+    }
+
+    if (mediaItems.length === 0) throw new Error("Tidak ada postingan ditemukan");
+
+    const instaResult = {
+      platform: 'instagram',
+      type: mediaItems.length > 1 ? 'playlist' : mediaItems[0].type,
+      shortcode: '',
+      author: username,
+      caption: `${count} postingan terbaru dari @${username}`,
+      title: `Instagram @${username}`,
+      timestamp: null,
+      likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+      mediaItems,
+      source: 'instaloader',
+    };
+
+    applyFilter(instaResult);
+    if (instaResult.mediaItems.length > 0) {
+      console.log(`[Scraper] ✅ Instagram posts (Instaloader): ${instaResult.mediaItems.length} item`);
+      return instaResult;
+    }
+    throw new Error(`Tidak ada postingan "${mediaType}" dari @${username}`);
+  } catch (err) {
+    console.warn(`[Scraper] Instaloader gagal: ${err.message.substring(0, 100)}`);
+  }
+
+  throw new Error(
+    `Gagal mengambil postingan Instagram dari @${username}. ` +
+    `Instagram memblokir akses dari IP server (datacenter). ` +
+    (cookieFiles.length === 0
+      ? `Solusi: tambahkan cookies Instagram valid ke folder cookies/ atau set env IG_COOKIE.`
+      : `Cookies terdeteksi tapi mungkin expired. Coba perbarui cookies di folder cookies/.`)
+  );
+}
+
+/**
+ * Mengambil postingan TikTok berdasarkan username.
+ * Menggunakan TikWM API dan yt-dlp sebagai fallback.
+ *
+ * @param {string} username - Username TikTok (tanpa @)
+ * @param {number} count - Jumlah postingan yang diambil (default 12, max 30)
+ * @param {string} mediaType - "image", "video", atau "all" (default "all")
+ * @returns {Promise<object>} Data postingan
+ */
+async function scrapeTikTokPostsByUsername(username, count = 12, mediaType = 'all') {
+  username = username.replace(/^@/, '').trim();
+  if (!username || username.length < 2) {
+    throw new Error("Username TikTok tidak valid.");
+  }
+
+  count = Math.min(Math.max(parseInt(count) || 12, 1), 30);
+  console.log(`[Scraper] Mengambil ${count} postingan TikTok dari @${username} (filter: ${mediaType})...`);
+
+  function parseTikWMItemFull(item) {
+    const videoId = item.video_id || item.id || '';
+    const tiktokUrl = videoId ? `https://www.tiktok.com/@${username}/video/${videoId}` : '';
+    // Thumbnail: selalu pakai cover image, jangan fallback ke video URL
+    const thumbnailUrl = item.cover || item.origin_cover || null;
+    // HD URL jika tersedia
+    const bestVideoUrl = item.hdplay || item.play;
+
+    if (item.images && item.images.length > 0) {
+      return item.images.map((imgUrl, imgIdx) => ({
+        type: 'image', url: imgUrl, thumbnail: imgUrl, width: null, height: null, duration: null, ext: 'jpg',
+        formats: [{ type: 'image', quality: `Foto ${imgIdx + 1}`, url: imgUrl, ext: 'jpg' }],
+      }));
+    }
+    if (item.play) {
+      const fmtList = [];
+      if (item.hdplay) {
+        fmtList.push({ type: 'video', quality: 'HD No Watermark', url: item.hdplay, ext: 'mp4' });
+      }
+      fmtList.push({ type: 'video', quality: 'No Watermark', url: item.play, ext: 'mp4' });
+      if (item.wmplay && item.wmplay !== item.play) {
+        fmtList.push({ type: 'video', quality: 'Watermark', url: item.wmplay, ext: 'mp4' });
+      }
+      if (item.music) {
+        fmtList.push({ type: 'audio', quality: 'Audio', url: item.music, ext: 'mp3' });
+      }
+      return [{
+        type: 'video',
+        url: bestVideoUrl,
+        thumbnail: thumbnailUrl,
+        width: null, height: null,
+        duration: item.duration || null,
+        ext: 'mp4',
+        pageUrl: tiktokUrl,
+        formats: fmtList,
+      }];
+    }
+    return [];
+  }
+
+  // Method 1: TikWM user/posts API (cepat, thumbnail proper)
+  try {
+    console.log(`[Scraper] Mencoba TikWM user/posts API untuk @${username}...`);
+    const resp = await axios.get(`https://www.tikwm.com/api/user/posts?unique_id=${encodeURIComponent(username)}&count=${count}`, {
+      timeout: 20000,
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
     });
 
-    const data = response.data;
-    if (data && data.code === 0 && data.data && data.data.videos && data.data.videos.length > 0) {
-      const mediaItems = [];
+    if (resp.data?.code === 0 && resp.data?.data?.videos?.length > 0) {
+      const rawItems = resp.data.data.videos.flatMap(parseTikWMItemFull);
+      let mediaItems = rawItems;
 
-      data.data.videos.forEach((item) => {
-        if (item.images && item.images.length > 0) {
-          // Photo slide
-          item.images.forEach((imgUrl, imgIdx) => {
-            mediaItems.push({
-              type: 'image',
-              url: imgUrl,
-              thumbnail: imgUrl,
-              width: null,
-              height: null,
-              duration: null,
-              ext: 'jpg',
-              formats: [{ type: 'image', quality: `Foto ${imgIdx + 1}`, url: imgUrl, ext: 'jpg' }],
-            });
-          });
-        } else if (item.play) {
-          mediaItems.push({
-            type: 'video',
-            url: item.play,
-            thumbnail: item.cover || item.origin_cover || item.play,
-            width: null,
-            height: null,
-            duration: item.duration || null,
-            ext: 'mp4',
-            formats: [
-              { type: 'video', quality: 'No Watermark', url: item.play, ext: 'mp4' },
-              ...(item.music ? [{ type: 'audio', quality: 'Audio', url: item.music, ext: 'mp3' }] : []),
-            ],
-          });
-        }
-      });
+      if (mediaType === 'image') {
+        mediaItems = mediaItems.filter(item => item.type === 'image');
+      } else if (mediaType === 'video') {
+        mediaItems = mediaItems.filter(item => item.type === 'video');
+      }
 
       if (mediaItems.length > 0) {
-        console.log(`[Scraper] TikWM posts: Ditemukan ${mediaItems.length} konten dari @${username}`);
+        console.log(`[Scraper] ✅ TikTok posts (TikWM): ${mediaItems.length} item untuk @${username}`);
         return {
           platform: 'tiktok',
           type: 'playlist',
           shortcode: '',
           author: username,
-          caption: `Konten terbaru dari @${username}`,
+          caption: `${count} postingan terbaru dari @${username}`,
           title: `TikTok @${username}`,
           timestamp: null,
-          likeCount: 0,
-          commentCount: 0,
-          viewCount: 0,
-          duration: null,
-          mediaItems: mediaItems.slice(0, 20),
+          likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+          mediaItems: mediaItems.slice(0, count * 3),
           source: 'tikwm_posts',
-          warning: 'Menampilkan postingan terbaru. Stories mungkin tidak tersedia jika sudah kedaluwarsa atau akun private.',
+          warning: null,
         };
+      }
+
+      // TikWM dapat konten, tapi semuanya ke-filter — jangan fallback ke yt-dlp
+      if (rawItems.length > 0) {
+        const availableTypes = [...new Set(rawItems.map(i => i.type))].join(' dan ');
+        throw new Error(
+          `Tidak ada postingan "${mediaType}" dari @${username}. ` +
+          `Akun ini hanya memiliki konten ${availableTypes}. ` +
+          `Coba ubah filter ke "Semua".`
+        );
       }
     }
   } catch (err) {
-    console.warn(`[Scraper] TikWM user posts gagal: ${err.message}`);
+    console.warn(`[Scraper] TikWM user/posts gagal: ${err.message}`);
+  }
+
+  // Method 2: yt-dlp profile (URL fresh, fallback)
+  const ytdlpAvailable = await checkYtDlp();
+  if (ytdlpAvailable) {
+    try {
+      console.log(`[Scraper] Mencoba yt-dlp fallback untuk @${username}...`);
+      const raw = await runCommand('yt-dlp', [
+        '--dump-single-json', '--no-warnings', '--playlist-end', String(count),
+        '--extractor-args', 'tiktok:api_hostname=api16-normal-c-useast1a.tiktokv.com;app_version=26.1.3',
+        '--add-header', 'User-Agent:Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        `https://www.tiktok.com/@${username}`,
+      ], 90000);
+
+      const info = JSON.parse(raw);
+      const result = parseYtDlpOutput(info, 'tiktok');
+      result.title = `TikTok @${username}`;
+      result.author = username;
+      result.caption = `${count} postingan terbaru dari @${username}`;
+
+      // Pastikan setiap item punya thumbnail, fallback ke placeholder
+      for (const item of result.mediaItems) {
+        if (!item.thumbnail || item.thumbnail.length < 5) {
+          item.thumbnail = item.url || '';
+        }
+      }
+
+      if (result.mediaItems.length > 0) {
+        if (mediaType === 'image') {
+          result.mediaItems = result.mediaItems.filter(item => item.type === 'image');
+        } else if (mediaType === 'video') {
+          result.mediaItems = result.mediaItems.filter(item => item.type === 'video');
+        }
+
+        if (result.mediaItems.length > 0) {
+          console.log(`[Scraper] ✅ TikTok posts (yt-dlp fallback): ${result.mediaItems.length} item untuk @${username}`);
+          return result;
+        }
+      }
+    } catch (err) {
+      console.warn(`[Scraper] yt-dlp TikTok posts gagal: ${err.message.substring(0, 120)}`);
+    }
   }
 
   throw new Error(
-    `Gagal mengambil TikTok Stories/konten dari @${username}. ` +
-    `Pastikan username benar, akun bersifat publik, dan memiliki story aktif.`
+    `Gagal mengambil postingan TikTok dari @${username}. ` +
+    `Pastikan username benar, akun publik, dan memiliki konten aktif.`
   );
 }
 
@@ -7026,6 +8393,9 @@ module.exports = {
   scrapeMedia,
   scrapeInstagram,
   scrapeTikTokStoriesByUsername,
+  scrapeYouTubePlaylist,
+  scrapeInstagramPostsByUsername,
+  scrapeTikTokPostsByUsername,
   detectPlatform,
   extractShortcode,
   isInstagramStoryUrl,
