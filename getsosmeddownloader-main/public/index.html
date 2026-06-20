@@ -824,16 +824,15 @@
     }
 
     .username-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
+      padding: 14px 16px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
     .username-header-icon {
-      width: 32px;
-      height: 32px;
+      width: 36px;
+      height: 36px;
       border-radius: 10px;
       background: linear-gradient(135deg, var(--cyan), #06b6d4);
       display: flex;
@@ -844,7 +843,7 @@
     }
 
     .username-header-text {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 700;
       color: var(--text);
     }
@@ -858,15 +857,26 @@
     .username-input-row {
       display: flex;
       align-items: center;
-      padding: 12px 14px;
-      gap: 10px;
+      margin: 0 14px 10px;
+      padding: 8px 12px;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface2);
+      transition: border-color 0.2s;
+    }
+
+    .username-input-row:focus-within {
+      border-color: var(--accent);
     }
 
     .username-at {
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--cyan);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--muted);
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
 
     .username-input-row input {
@@ -875,7 +885,7 @@
       border: none;
       outline: none;
       color: var(--text);
-      font-size: 15px;
+      font-size: 14px;
       font-family: 'Inter', sans-serif;
       min-width: 0;
     }
@@ -888,20 +898,362 @@
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      padding: 8px 10px;
+      padding: 10px 14px;
       border-top: 1px solid var(--border);
       gap: 6px;
     }
 
+    .search-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 16px;
+      display: none;
+      animation: cardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .search-card:focus-within {
+      border-color: rgba(139, 92, 246, 0.4);
+      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08), 0 8px 32px rgba(139, 92, 246, 0.06);
+    }
+
+    .search-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .search-header-text {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .search-header-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .search-source-row {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px 0;
+      flex-wrap: wrap;
+    }
+
+    .search-source-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .search-source-chip svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+
+    .search-source-chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+      background: var(--accent-dim);
+    }
+
+    .search-source-chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .search-input-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .search-input-row input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      outline: none;
+      color: var(--text);
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .search-input-row input:focus {
+      border-color: var(--accent);
+    }
+
+    .search-input-row select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .search-results {
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .search-result-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.2s;
+      cursor: default;
+    }
+
+    .search-result-item:hover {
+      background: var(--surface2);
+    }
+
+    .search-result-item:last-child {
+      border-bottom: none;
+    }
+
+    .search-result-thumb {
+      width: 56px;
+      height: 42px;
+      border-radius: 6px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--surface3);
+    }
+
+    .search-result-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .search-result-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .search-result-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .search-result-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      align-items: center;
+    }
+
+    .search-dl-btn {
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+
+    .search-dl-btn:hover {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent-light);
+    }
+
+    .search-dl-btn.vid {
+      color: var(--pink);
+    }
+
+    .search-dl-btn.vid:hover {
+      background: rgba(236, 72, 153, 0.12);
+      border-color: var(--pink);
+    }
+
+    .search-dl-btn.aud {
+      color: var(--cyan);
+    }
+
+    .search-dl-btn.aud:hover {
+      background: rgba(6, 182, 212, 0.12);
+      border-color: var(--cyan);
+    }
+
+    .search-dl-btn.prev {
+      color: var(--accent-light);
+    }
+
+    .search-dl-btn.prev:hover {
+      background: rgba(139, 92, 246, 0.12);
+      border-color: var(--accent);
+    }
+
+    .search-dl-btn.lyr {
+      color: var(--green);
+    }
+
+    .search-dl-btn.lyr:hover {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: var(--green);
+    }
+
+    .search-quality {
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 4px;
+      color: var(--text);
+      font-size: 10px;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .search-quality:hover {
+      border-color: var(--accent);
+    }
+
+    .search-loading {
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .search-empty {
+      padding: 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .username-info {
-      padding: 8px 14px;
+      margin: 0 14px 10px;
+      padding: 8px 12px;
       font-size: 11px;
       color: var(--muted);
       background: var(--surface2);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       gap: 6px;
       line-height: 1.4;
+    }
+
+    .username-source-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 0 14px 12px;
+    }
+
+    .source-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .source-chip svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .source-chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+      background: var(--accent-dim);
+    }
+
+    .source-chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .username-options-row {
+      display: flex;
+      gap: 10px;
+      padding: 10px 14px 14px;
+    }
+
+    .option-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      flex: 1;
+    }
+
+    .option-group label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .option-group select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      padding: 7px 10px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .option-group select:focus {
+      border-color: var(--accent);
     }
 
     /* ─── Input Card ─── */
@@ -1255,6 +1607,37 @@
       background: rgba(255, 255, 255, 0.10);
       color: #e0e0e0;
       border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .tag.vkontakte {
+      background: rgba(74, 118, 168, 0.15);
+      color: #6d9fd1;
+      border: 1px solid rgba(74, 118, 168, 0.3);
+    }
+
+    .tag.vihey {
+      background: rgba(0, 200, 200, 0.12);
+      color: #00c8c8;
+    }
+
+    .tag.vizey {
+      background: rgba(0, 200, 200, 0.12);
+      color: #00c8c8;
+    }
+
+    .tag.slicidrive {
+      background: rgba(255, 165, 0, 0.12);
+      color: #ffa500;
+    }
+
+    .tag.viday {
+      background: rgba(0, 200, 200, 0.12);
+      color: #00c8c8;
+    }
+
+    .tag.videy {
+      background: rgba(0, 200, 200, 0.12);
+      color: #00c8c8;
     }
 
     .tag.type {
@@ -1673,6 +2056,7 @@
       justify-content: center;
       overflow: hidden;
       padding: 8px;
+      position: relative;
     }
 
     .modal-body video,
@@ -1854,6 +2238,60 @@
       padding: 2px 7px;
       border-radius: 100px;
       text-transform: uppercase;
+    }
+
+    /* ─── Mobile Search Results (≤639px) ─── */
+    @media (max-width: 639px) {
+      .search-result-item {
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: flex-start;
+      }
+
+      .search-result-info {
+        flex: 1 1 calc(100% - 66px);
+        width: calc(100% - 66px);
+        max-width: calc(100% - 66px);
+      }
+
+      .search-result-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-left: 64px;
+      }
+
+      .search-quality {
+        flex: 0 0 auto;
+      }
+
+      .search-dl-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        min-width: 0;
+        font-size: 10px;
+        padding: 5px 7px;
+      }
+
+      .search-input-row {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .search-input-row input {
+        width: 100%;
+        flex: 1 1 100%;
+      }
+
+      .search-input-row .fetch-btn {
+        flex: 1 1 100%;
+        width: 100%;
+        justify-content: center;
+      }
+
+      .search-results {
+        max-height: 60vh;
+      }
     }
 
     /* ─── Desktop ─── */
@@ -2191,6 +2629,13 @@
     .card.pf-spotify { border-left: 3px solid #1ed760; }
     .card.pf-pinterest { border-left: 3px solid #e60023; }
     .card.pf-threads { border-left: 3px solid #ffffff30; }
+    .card.pf-vkontakte { border-left: 3px solid #4a76a8; }
+    .card.pf-vihey { border-left: 3px solid #00c8c8; }
+    .card.pf-vizey { border-left: 3px solid #00c8c8; }
+    .card.pf-slicidrive { border-left: 3px solid #ffa500; }
+    .card.pf-viday { border-left: 3px solid #00c8c8; }
+    .card.pf-videy { border-left: 3px solid #00c8c8; }
+
 
     /* ─── Search History Input ─── */
     .hist-search {
@@ -2266,6 +2711,99 @@
       border-radius: 100px;
       margin-bottom: 12px;
       border: 1px solid rgba(139, 92, 246, 0.2);
+    }
+
+    /* ─── Bug Report FAB & Modal ─── */
+    .report-fab {
+      position: fixed;
+      bottom: calc(24px + var(--safe-bottom));
+      left: 24px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--red), var(--orange));
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+      cursor: pointer;
+      z-index: 90;
+      transition: all 0.3s;
+    }
+    .report-fab:hover {
+      transform: scale(1.05) translateY(-2px);
+      box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
+    }
+    .report-fab:active {
+      transform: scale(0.95);
+    }
+    .report-fab svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    #reportModal {
+      align-items: center;
+      justify-content: center;
+    }
+    #reportModal .modal-body {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+      position: relative;
+    }
+    .report-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 16px;
+      text-align: left;
+    }
+    .report-form label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 4px;
+      display: block;
+    }
+    .report-form input, .report-form textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .report-form input:focus, .report-form textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: var(--surface3);
+    }
+    .report-form textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+    .report-btn {
+      background: linear-gradient(135deg, var(--red), var(--orange));
+      color: #fff;
+      border: none;
+      padding: 14px;
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 8px;
+    }
+    .report-btn:hover {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
     }
   </style>
 </head>
@@ -2429,6 +2967,13 @@
         </svg>
         Username Mode
       </button>
+      <button class="mode-tab" id="tabSearch" onclick="switchMode('search')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        Search
+      </button>
     </div>
 
     <!-- Input (Link Mode) -->
@@ -2460,31 +3005,105 @@
       <div class="username-header">
         <div class="username-header-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 15.66a6.34 6.34 0 0010.86 4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1.04-.08z"></path>
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
           </svg>
         </div>
         <div>
-          <div class="username-header-text">TikTok Story Downloader</div>
-          <div class="username-header-sub">Masukkan username TikTok untuk ambil stories</div>
+          <div class="username-header-text" id="usernameHeaderText">Username Mode</div>
+          <div class="username-header-sub" id="usernameHeaderSub">Pilih fitur untuk mengambil konten</div>
         </div>
       </div>
+      <div class="username-source-row" id="usernameSourceRow">
+        <button class="source-chip active" data-source="tiktok-story" onclick="selectUsernameSource('tiktok-story')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          TikTok Story
+        </button>
+        <button class="source-chip" data-source="tiktok-post" onclick="selectUsernameSource('tiktok-post')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+          TikTok Posts
+        </button>
+        <button class="source-chip" data-source="instagram-post" onclick="selectUsernameSource('instagram-post')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="5"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+          Instagram Posts
+        </button>
+        <button class="source-chip" data-source="youtube-playlist" onclick="selectUsernameSource('youtube-playlist')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="14" y1="8" x2="14" y2="16"/></svg>
+          YouTube Playlist
+        </button>
+      </div>
       <div class="username-input-row">
-        <span class="username-at">@</span>
+        <span class="username-at" id="usernameAt">@</span>
         <input type="text" id="usernameInput" placeholder="username" autocomplete="off" spellcheck="false" />
       </div>
-      <div class="username-info">
+      <div class="username-options-row" id="usernameOptionsRow" style="display:none">
+        <div class="option-group">
+          <label>Jumlah</label>
+          <select id="usernameCount">
+            <option value="6">6 postingan</option>
+            <option value="12" selected>12 postingan</option>
+            <option value="18">18 postingan</option>
+            <option value="24">24 postingan</option>
+            <option value="30">30 postingan</option>
+          </select>
+        </div>
+        <div class="option-group">
+          <label>Media</label>
+          <select id="usernameMediaType">
+            <option value="all" selected>Semua (Foto + Video)</option>
+            <option value="image">Foto saja</option>
+            <option value="video">Video saja</option>
+          </select>
+        </div>
+      </div>
+      <div class="username-info" id="usernameInfo">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <line x1="12" y1="16" x2="12" y2="12"></line>
           <line x1="12" y1="8" x2="12.01" y2="8"></line>
         </svg>
-        Stories TikTok hanya tersedia 24 jam. Akun harus bersifat publik.
+        <span id="usernameInfoText">Stories TikTok hanya tersedia 24 jam. Akun harus bersifat publik.</span>
       </div>
       <div class="username-actions">
         <button class="fetch-btn" id="fetchUsernameBtn" onclick="fetchByUsername()" style="box-shadow: 0 2px 12px rgba(6, 182, 212, 0.25); background: linear-gradient(135deg, #06b6d4, #0891b2)">
-          <span>🎵 Ambil TikTok Story</span>
+          <span id="fetchUsernameBtnLabel"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg> Ambil TikTok Story</span>
         </button>
       </div>
+    </div>
+
+    <!-- Search Card -->
+    <div class="search-card" id="searchCard">
+      <div class="search-header">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-light)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <div>
+          <div class="search-header-text" id="searchHeaderText">Cari Musik & Video</div>
+          <div class="search-header-sub" id="searchHeaderSub">YouTube — cari judul lagu, artis, atau video</div>
+        </div>
+      </div>
+      <div class="search-source-row" id="searchSourceRow">
+        <button class="search-source-chip active" data-platform="youtube" onclick="selectSearchPlatform('youtube')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          YouTube
+        </button>
+        <button class="search-source-chip" data-platform="tiktok" onclick="selectSearchPlatform('tiktok')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          TikTok
+        </button>
+      </div>
+      <div class="search-input-row">
+        <input type="text" id="searchInput" placeholder="Judul lagu, artis, atau kata kunci..." autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter')doSearch()" />
+        <button class="fetch-btn" id="searchBtn" onclick="doSearch()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          Cari
+        </button>
+      </div>
+      <div class="search-results" id="searchResults"></div>
     </div>
 
     <!-- Status -->
@@ -2562,6 +3181,41 @@
       <button class="modal-close" onclick="closePreview()">✕</button>
     </div>
     <div class="modal-body" id="prevBody"></div>
+  </div>
+
+  <!-- Modal Lyrics -->
+  <div class="modal-bg" id="lyricsModal" onclick="if(event.target===this)closeLyrics()">
+    <div class="modal-top">
+      <span class="modal-title-text" id="lyricsTitle">Lirik</span>
+      <button class="modal-close" onclick="closeLyrics()">✕</button>
+    </div>
+    <div class="modal-body" style="white-space:pre-wrap;font-size:14px;line-height:1.7;padding:20px;overflow-y:auto;max-height:70vh;color:var(--text)" id="lyricsBody"></div>
+  </div>
+
+  <!-- FAB Report Bug -->
+  <div class="report-fab" onclick="openReportModal()" data-tooltip="Laporkan Bug/Gagal Download">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>
+  </div>
+
+  <!-- Modal Report Bug -->
+  <div class="modal-bg" id="reportModal">
+    <div class="modal-body">
+      <h3 style="font-size:20px; font-weight:800; margin-bottom:8px; text-align:center;">Laporkan Masalah</h3>
+      <p style="font-size:13px; color:var(--muted); margin-bottom:16px; text-align:center;">Gagal mengunduh? Beritahu kami link yang bermasalah agar segera diperbaiki.</p>
+      
+      <form class="report-form" id="reportForm" onsubmit="submitReport(event)">
+        <div>
+          <label for="reportUrl">Link Media yang Gagal</label>
+          <input type="url" id="reportUrl" placeholder="https://..." required>
+        </div>
+        <div>
+          <label for="reportDesc">Jelaskan Masalahnya</label>
+          <textarea id="reportDesc" placeholder="Contoh: Selalu muncul loading lama, atau link ini error 500..." required></textarea>
+        </div>
+        <button type="submit" class="report-btn" id="reportSubmitBtn">Kirim Laporan</button>
+      </form>
+      <button class="modal-close" style="position:absolute; top:12px; right:12px; border:none; background:transparent; color:var(--text2); cursor:pointer;" onclick="closeReportModal()">✕</button>
+    </div>
   </div>
 
   <!-- QR Modal -->
@@ -2681,6 +3335,8 @@
     <div class="analytics-box" id="histStats" style="display:none;"></div>
     <div class="sheet-list" id="histList"></div>
   </div>
+
+  <!-- Firebase Config removed for backend security -->
 
   <script>
     // ─── Cursor Glow Effect (disabled for performance) ───
@@ -2861,17 +3517,34 @@
     updBadge();
 
     // ═══════════ PREVIEW ═══════════
-    function openPrev(url, type, title) {
+    function openPrev(url, type, title, audioUrl, sharedHeadersB64) {
       const m = document.getElementById('previewModal');
       const b = document.getElementById('prevBody');
       const t = document.getElementById('prevTitle');
-      // Jika base64 data: URL atau local URL, gunakan langsung tanpa proxy
-      const src = (url && (url.startsWith('data:') || url.startsWith('http://localhost') || url.startsWith('/temp')))
-        ? url
-        : `${API}/api/proxy?url=${encodeURIComponent(url)}&inline=true`;
-      b.innerHTML = type === 'video'
-        ? `<video src="${src}" controls autoplay playsinline preload="auto" style="width:100%"></video>`
-        : `<img src="${src}" alt="Preview" />`;
+      let src;
+      if (type === 'video' && audioUrl) {
+        src = `${API}/api/merge-video?videoUrl=${encodeURIComponent(url)}&audioUrl=${encodeURIComponent(audioUrl)}&stream=1`;
+        if (sharedHeadersB64) src += `&hdr=${encodeURIComponent(sharedHeadersB64)}`;
+      } else {
+        src = (url && (url.startsWith('data:') || url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')))
+          ? url
+          : `${API}/api/proxy?url=${encodeURIComponent(url)}&inline=true`;
+      }
+      if (type === 'video') {
+        b.innerHTML = `<div id="prevLoadWrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:200px;gap:12px">
+          <div class="spin" style="width:36px;height:36px;border-width:3px"></div>
+          <div style="color:var(--muted);font-size:13px">Memuat preview...</div>
+        </div>
+        <div id="prevUnmuteWrap" style="display:none;position:absolute;bottom:60px;left:50%;transform:translateX(-50%);z-index:10">
+          <button style="background:rgba(0,0,0,0.75);color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 18px;border-radius:24px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:8px;backdrop-filter:blur(8px)" onclick="const v=document.getElementById('prevBody').querySelector('video');if(v){v.muted=false;v.play().catch(()=>{});this.parentElement.style.display='none'}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            Tap untuk suara
+          </button>
+        </div>
+        <video src="${src}" controls muted autoplay playsinline preload="auto" style="width:100%" onloadeddata="const ld=document.getElementById('prevLoadWrap');if(ld)ld.remove();const vid=this;vid.muted=false;vid.play().then(()=>{const uw=document.getElementById('prevUnmuteWrap');if(uw)uw.style.display='none'}).catch(()=>{vid.muted=true;vid.play().catch(()=>{});const uw=document.getElementById('prevUnmuteWrap');if(uw)uw.style.display='block'})" onerror="const ld=document.getElementById('prevLoadWrap');if(ld)ld.innerHTML='<div style=color:var(--red)>Gagal memuat preview. Coba download langsung.</div>'" oncanplay="const ld=document.getElementById('prevLoadWrap');if(ld)ld.remove()"></video>`;
+      } else {
+        b.innerHTML = `<img src="${src}" alt="Preview" style="max-width:100%;max-height:100%;object-fit:contain" onerror="this.alt='Gagal memuat preview'">`;
+      }
       t.textContent = title || 'Preview';
       m.classList.add('open');
       document.body.style.overflow = 'hidden';
@@ -2880,14 +3553,20 @@
     function closePreview() {
       const m = document.getElementById('previewModal');
       const v = m.querySelector('video');
-      if (v) { v.pause(); v.src = ''; }
+      if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
       m.classList.remove('open');
       document.getElementById('prevBody').innerHTML = '';
       document.body.style.overflow = '';
     }
 
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
-    document.getElementById('previewModal').addEventListener('click', e => { if (e.target === e.currentTarget || e.target.classList.contains('modal-body')) closePreview(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        const lm = document.getElementById('lyricsModal');
+        if (lm && lm.classList.contains('open')) { closeLyrics(); return; }
+        closePreview();
+      }
+    });
+    document.getElementById('previewModal').addEventListener('click', e => { if (e.target === e.currentTarget) closePreview(); });
 
     // ═══════════ EXTENSION BRIDGE ═══════════
     let extensionReady = false;
@@ -3042,26 +3721,387 @@
     }
 
     // ═══════════ MODES & USERNAME FETCH ═══════════
+    let currentSource = 'tiktok-story';
+
     function switchMode(mode) {
       const tabLink = document.getElementById('tabLink');
       const tabUser = document.getElementById('tabUsername');
+      const tabSearch = document.getElementById('tabSearch');
       const inputCard = document.getElementById('inputCard');
       const userCard = document.getElementById('usernameCard');
+      const searchCard = document.getElementById('searchCard');
       const errBox = document.getElementById('statusErr');
-      
+
       errBox.style.display = 'none';
+      inputCard.style.display = 'none';
+      userCard.classList.remove('visible');
+      searchCard.style.display = 'none';
+      tabLink.classList.remove('active');
+      tabUser.classList.remove('active');
+      tabSearch.classList.remove('active');
 
       if (mode === 'link') {
         tabLink.classList.add('active');
-        tabUser.classList.remove('active');
         inputCard.style.display = 'block';
-        userCard.classList.remove('visible');
-      } else {
+      } else if (mode === 'username') {
         tabUser.classList.add('active');
-        tabLink.classList.remove('active');
-        inputCard.style.display = 'none';
         userCard.classList.add('visible');
+      } else if (mode === 'search') {
+        tabSearch.classList.add('active');
+        searchCard.style.display = 'block';
+        document.getElementById('searchInput').focus();
       }
+    }
+
+    function selectUsernameSource(source) {
+      currentSource = source;
+
+      // Update active chip
+      document.querySelectorAll('.source-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.getAttribute('data-source') === source);
+      });
+
+      const headerText = document.getElementById('usernameHeaderText');
+      const headerSub = document.getElementById('usernameHeaderSub');
+      const atSign = document.getElementById('usernameAt');
+      const input = document.getElementById('usernameInput');
+      const optionsRow = document.getElementById('usernameOptionsRow');
+      const infoText = document.getElementById('usernameInfoText');
+      const btnLabel = document.getElementById('fetchUsernameBtnLabel');
+      const btn = document.getElementById('fetchUsernameBtn');
+
+      switch (source) {
+        case 'tiktok-story':
+          headerText.textContent = 'TikTok Story Downloader';
+          headerSub.textContent = 'Masukkan username TikTok untuk ambil stories';
+          atSign.textContent = '@';
+          input.placeholder = 'username';
+          optionsRow.style.display = 'none';
+          infoText.textContent = 'Stories TikTok hanya tersedia 24 jam. Akun harus bersifat publik.';
+          btnLabel.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg> Ambil TikTok Story';
+          btn.style.background = 'linear-gradient(135deg, #06b6d4, #0891b2)';
+          btn.style.boxShadow = '0 2px 12px rgba(6, 182, 212, 0.25)';
+          break;
+
+        case 'tiktok-post':
+          headerText.textContent = 'TikTok Post Downloader';
+          headerSub.textContent = 'Masukkan username TikTok untuk ambil postingan';
+          atSign.textContent = '@';
+          input.placeholder = 'username';
+          optionsRow.style.display = 'flex';
+          infoText.textContent = 'Ambil postingan TikTok berdasarkan username. Akun harus publik.';
+          btnLabel.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg> Ambil Postingan TikTok';
+          btn.style.background = 'linear-gradient(135deg, #06b6d4, #0891b2)';
+          btn.style.boxShadow = '0 2px 12px rgba(6, 182, 212, 0.25)';
+          break;
+
+        case 'instagram-post':
+          headerText.textContent = 'Instagram Post Downloader';
+          headerSub.textContent = 'Masukkan username Instagram untuk ambil postingan';
+          atSign.textContent = '@';
+          input.placeholder = 'username';
+          optionsRow.style.display = 'flex';
+          infoText.textContent = 'Ambil postingan Instagram berdasarkan username. Akun harus publik.';
+          btnLabel.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="5"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg> Ambil Postingan Instagram';
+          btn.style.background = 'linear-gradient(135deg, #ec4899, #be185d)';
+          btn.style.boxShadow = '0 2px 12px rgba(236, 72, 153, 0.25)';
+          break;
+
+        case 'youtube-playlist':
+          headerText.textContent = 'YouTube Playlist Downloader';
+          headerSub.textContent = 'Masukkan URL playlist YouTube';
+          atSign.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+          input.placeholder = 'https://www.youtube.com/playlist?list=...';
+          optionsRow.style.display = 'none';
+          infoText.textContent = 'Tempel link playlist YouTube. Maksimal 100 video akan diambil.';
+          btnLabel.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="14" y1="8" x2="14" y2="16"/></svg> Ambil Playlist YouTube';
+          btn.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+          btn.style.boxShadow = '0 2px 12px rgba(239, 68, 68, 0.25)';
+          break;
+      }
+    }
+
+    // ═══════════ SEARCH PLATFORM ═══════════
+    let currentSearchPlatform = 'youtube';
+
+    function selectSearchPlatform(platform) {
+      currentSearchPlatform = platform;
+      document.querySelectorAll('.search-source-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.getAttribute('data-platform') === platform);
+      });
+
+      const headerText = document.getElementById('searchHeaderText');
+      const headerSub = document.getElementById('searchHeaderSub');
+      const searchInput = document.getElementById('searchInput');
+      const resultsEl = document.getElementById('searchResults');
+      resultsEl.innerHTML = '';
+
+      if (platform === 'youtube') {
+        headerText.textContent = 'Cari Musik & Video';
+        headerSub.textContent = 'YouTube — cari judul lagu, artis, atau video';
+        searchInput.placeholder = 'Judul lagu, artis, atau kata kunci...';
+      } else if (platform === 'tiktok') {
+        headerText.textContent = 'Cari Video TikTok';
+        headerSub.textContent = 'TikTok — cari video berdasarkan kata kunci';
+        searchInput.placeholder = 'Kata kunci, hashtag, atau topik...';
+      }
+      searchInput.focus();
+    }
+
+    // ═══════════ SEARCH (YouTube & TikTok) ═══════════
+    async function doSearch() {
+      const input = document.getElementById('searchInput');
+      const query = input.value.trim();
+      if (!query) return;
+
+      const resultsEl = document.getElementById('searchResults');
+      const btn = document.getElementById('searchBtn');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin" style="display:inline-block;width:14px;height:14px;border-width:2px;margin-right:4px;vertical-align:-2px"></span> Mencari...';
+
+      resultsEl.innerHTML = '<div class="search-loading"><span class="spin" style="display:inline-block;width:16px;height:16px;border-width:2px;margin-bottom:8px"></span><br>Mencari...</div>';
+
+      try {
+        let apiUrl = '';
+        if (currentSearchPlatform === 'youtube') {
+          apiUrl = `${API}/api/yt-search?q=${encodeURIComponent(query)}&limit=500`;
+        } else if (currentSearchPlatform === 'tiktok') {
+          apiUrl = `${API}/api/tiktok-search?q=${encodeURIComponent(query)}&limit=120`;
+        }
+        const r = await fetch(apiUrl);
+        const j = await r.json();
+        if (j.success && j.data.length > 0) {
+          if (currentSearchPlatform === 'youtube') {
+            renderYouTubeResults(j.data);
+          } else if (currentSearchPlatform === 'tiktok') {
+            renderTikTokResults(j.data);
+          }
+        } else {
+          resultsEl.innerHTML = '<div class="search-empty">Tidak ada hasil ditemukan</div>';
+        }
+      } catch (e) {
+        resultsEl.innerHTML = `<div class="search-empty">Error: ${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:-2px"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg> Cari';
+      }
+    }
+
+    function renderYouTubeResults(results) {
+      const resultsEl = document.getElementById('searchResults');
+      let html = `<div style="padding:8px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">Menampilkan ${results.length} hasil</div>`;
+      results.forEach((item, i) => {
+        const thumb = item.thumbnail || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`;
+        const dur = item.duration ? fmtDur(item.duration) : '';
+        const channel = item.channel ? `<span>${esc(item.channel)}</span>` : '';
+        const views = item.views ? `${(item.views/1000).toFixed(0)}K ditonton` : '';
+        const videoId = item.id;
+        const encVideoId = encodeURIComponent(videoId);
+        const title = item.title || 'Untitled';
+        const encTitle = encodeURIComponent(title);
+        const escapedTitle = esc(title);
+        const encChannel = encodeURIComponent(item.channel || '');
+
+        html += `<div class="search-result-item">
+          <img class="search-result-thumb" src="${thumb}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2242%22><rect fill=%22%23222%22 width=%2256%22 height=%2242%22/></svg>'">
+          <div class="search-result-info">
+            <div class="search-result-title">${escapedTitle}</div>
+            <div class="search-result-meta">${channel ? channel + ' • ' : ''}${dur}${views ? ' • ' + views : ''}</div>
+          </div>
+          <div class="search-result-actions">
+            <select class="search-quality" onchange="void(0)">
+              <option value="best[ext=mp4]">Auto</option>
+              <option value="best[height<=144][ext=mp4]">144p</option>
+              <option value="best[height<=240][ext=mp4]">240p</option>
+              <option value="best[height<=360][ext=mp4]">360p</option>
+              <option value="best[height<=480][ext=mp4]">480p</option>
+              <option value="best[height<=720][ext=mp4]" selected>720p</option>
+              <option value="best[height<=1080][ext=mp4]">1080p</option>
+            </select>
+            <button class="search-dl-btn prev" onclick="openPrev('/api/yt-download?videoId=${encVideoId}&formatId=best%5Bext%3Dmp4%5D','video','${escapedTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Preview
+            </button>
+            <button class="search-dl-btn vid" onclick="dlVideoSearch(this,'${encVideoId}','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Video
+            </button>
+            <button class="search-dl-btn aud" onclick="dlExtractAudio('/api/yt-download?videoId=${encVideoId}&formatId=bestaudio%5Bext%3Dm4a%5D','youtube','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> MP3
+            </button>
+            <button class="search-dl-btn lyr" onclick="fetchSearchLyrics('${encTitle}','${encChannel}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Lirik
+            </button>
+          </div>
+        </div>`;
+      });
+      resultsEl.innerHTML = html;
+    }
+
+    function renderTikTokResults(results) {
+      const resultsEl = document.getElementById('searchResults');
+      let html = `<div style="padding:8px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">Menampilkan ${results.length} hasil TikTok</div>`;
+      results.forEach((item) => {
+        const thumb = item.thumbnail || '';
+        const dur = item.duration ? fmtDur(item.duration) : '';
+        const author = item.author ? `<span>@${esc(item.author)}</span>` : '';
+        const authorName = item.authorName ? esc(item.authorName) : '';
+        const views = item.views ? `${formatViews(item.views)} ditonton` : '';
+        const likes = item.likes ? `${formatViews(item.likes)} suka` : '';
+        const title = item.title || 'Untitled';
+        const encTitle = encodeURIComponent(title);
+        const escapedTitle = esc(title);
+        const url = item.url || '';
+        const encUrl = encodeURIComponent(url);
+        const encThumb = encodeURIComponent(thumb);
+
+        html += `<div class="search-result-item">
+          <img class="search-result-thumb" src="${thumb}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2256%22 height=%2242%22><rect fill=%22%23222%22 width=%2256%22 height=%2242%22/></svg>'">
+          <div class="search-result-info">
+            <div class="search-result-title">${escapedTitle}</div>
+            <div class="search-result-meta">${author ? author : ''}${authorName ? ' • ' + authorName : ''}${dur ? ' • ' + dur : ''}${views ? ' • ' + views : ''}${likes ? ' • ' + likes : ''}</div>
+          </div>
+          <div class="search-result-actions">
+            <button class="search-dl-btn prev" onclick="prevTikTokSearch(this,'${encUrl}','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Preview
+            </button>
+            <button class="search-dl-btn vid" onclick="dlTikTokSearch(this,'${encUrl}','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Video
+            </button>
+            <button class="search-dl-btn aud" onclick="dlTikTokMp3(this,'${encUrl}','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> MP3
+            </button>
+            <button class="search-dl-btn img" onclick="dlTikTokThumb(this,'${encThumb}','${encTitle}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Foto
+            </button>
+          </div>
+        </div>`;
+      });
+      resultsEl.innerHTML = html;
+    }
+
+    function formatViews(num) {
+      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+      return num.toString();
+    }
+
+    async function dlTikTokSearch(btn, encUrl, encTitle) {
+      const url = decodeURIComponent(encUrl);
+      const title = decodeURIComponent(encTitle);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin" style="display:inline-block;width:12px;height:12px;border-width:2px"></span>';
+      try {
+        const r = await fetch(`${API}/api/fetch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url })
+        });
+        const j = await r.json();
+        if (j.success && j.data && j.data.length > 0) {
+          const resultData = j.data[0];
+          const mediaItems = resultData.mediaItems || resultData.media || [];
+          if (mediaItems.length > 0) {
+            const media = mediaItems[0];
+            const dlUrl = media.downloadUrl || media.url || '';
+            if (dlUrl) {
+              window.open(dlUrl, '_blank');
+              btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Done';
+              btn.style.background = 'rgba(34,197,94,0.2)';
+              btn.style.color = '#22c55e';
+              return;
+            }
+          }
+        }
+        btn.innerHTML = 'Gagal';
+        btn.disabled = false;
+      } catch (e) {
+        btn.innerHTML = 'Error';
+        btn.disabled = false;
+      }
+    }
+
+    async function prevTikTokSearch(btn, encUrl, encTitle) {
+      const url = decodeURIComponent(encUrl);
+      const title = decodeURIComponent(encTitle);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin" style="display:inline-block;width:12px;height:12px;border-width:2px"></span>';
+      try {
+        const r = await fetch(`${API}/api/fetch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url })
+        });
+        const j = await r.json();
+        if (j.success && j.data && j.data.length > 0) {
+          const resultData = j.data[0];
+          const mediaItems = resultData.mediaItems || resultData.media || [];
+          if (mediaItems.length > 0) {
+            const media = mediaItems[0];
+            const dlUrl = media.downloadUrl || media.url || '';
+            if (dlUrl) {
+              openPrev(dlUrl, 'video', title);
+              btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Done';
+              btn.style.background = 'rgba(59,130,246,0.2)';
+              btn.style.color = '#3b82f6';
+              btn.disabled = false;
+              return;
+            }
+          }
+        }
+        btn.innerHTML = 'Gagal';
+        btn.disabled = false;
+      } catch (e) {
+        btn.innerHTML = 'Error';
+        btn.disabled = false;
+      }
+    }
+
+    async function dlTikTokMp3(btn, encUrl, encTitle) {
+      const url = decodeURIComponent(encUrl);
+      const title = decodeURIComponent(encTitle);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin" style="display:inline-block;width:12px;height:12px;border-width:2px"></span>';
+      try {
+        const r = await fetch(`${API}/api/fetch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url })
+        });
+        const j = await r.json();
+        if (j.success && j.data && j.data.length > 0) {
+          const resultData = j.data[0];
+          const mediaItems = resultData.mediaItems || resultData.media || [];
+          if (mediaItems.length > 0) {
+            const media = mediaItems[0];
+            const dlUrl = media.downloadUrl || media.url || '';
+            if (dlUrl) {
+              const mp3Url = `${API}/api/extract-audio?url=${encodeURIComponent(dlUrl)}&title=${encodeURIComponent(title)}&platform=tiktok`;
+              window.open(mp3Url, '_blank');
+              btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Done';
+              btn.style.background = 'rgba(34,197,94,0.2)';
+              btn.style.color = '#22c55e';
+              return;
+            }
+          }
+        }
+        btn.innerHTML = 'Gagal';
+        btn.disabled = false;
+      } catch (e) {
+        btn.innerHTML = 'Error';
+        btn.disabled = false;
+      }
+    }
+
+    function dlTikTokThumb(btn, encThumb, encTitle) {
+      const thumb = decodeURIComponent(encThumb);
+      const title = decodeURIComponent(encTitle);
+      if (!thumb) { btn.innerHTML = 'Gagal'; return; }
+      const proxyUrl = `${API}/api/proxy?url=${encodeURIComponent(thumb)}&filename=${encodeURIComponent(title.replace(/[^a-zA-Z0-9]/g, '_') + '_thumb.jpg')}`;
+      window.open(proxyUrl, '_blank');
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Done';
+      btn.style.background = 'rgba(34,197,94,0.2)';
+      btn.style.color = '#22c55e';
+      setTimeout(() => { btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Foto'; btn.style.background = ''; btn.style.color = ''; }, 3000);
     }
 
     async function fetchByUsername() {
@@ -3075,7 +4115,7 @@
       const bb = document.getElementById('batchBar');
 
       if (!username || username.length < 2) {
-        showErr('Masukkan username TikTok yang valid (min. 2 karakter).');
+        showErr('Masukkan username / URL yang valid.');
         return;
       }
 
@@ -3091,19 +4131,19 @@
       showSkeleton();
       bb.style.display = 'none';
       ld.classList.add('loading');
-      lt.textContent = `Mengambil TikTok Stories untuk @${username}...`;
-      
+      lt.textContent = 'Memproses...';
+
       const originalBtnContent = btn.innerHTML;
       btn.disabled = true;
       btn.innerHTML = '<span>Memproses...</span>';
       gResults = [];
 
       abortCtl = new AbortController();
-      const toId = setTimeout(() => { if (abortCtl) abortCtl.abort(); }, 90000);
-      
+      const toId = setTimeout(() => { if (abortCtl) abortCtl.abort(); }, 120000);
+
       const msgs = [
         [3000, 'Menghubungi server...'],
-        [8000, 'Mengambil stories...'],
+        [8000, 'Mengambil konten...'],
         [15000, 'Memproses data...'],
         [30000, 'Mencari konten terbaru...'],
       ];
@@ -3119,10 +4159,20 @@
       };
 
       try {
-        const resp = await fetch(`${API}/api/fetch-tiktok-story`, {
+        const body = { source: currentSource, username };
+
+        if (currentSource === 'tiktok-post' || currentSource === 'instagram-post') {
+          body.count = parseInt(document.getElementById('usernameCount').value) || 12;
+          body.mediaType = document.getElementById('usernameMediaType').value || 'all';
+        }
+
+        // For YouTube playlist, username field contains the URL
+        // (the backend uses the 'username' field for all sources)
+
+        const resp = await fetch(`${API}/api/fetch-username`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username }),
+          body: JSON.stringify(body),
           signal: abortCtl.signal,
         });
 
@@ -3135,30 +4185,30 @@
         let json;
         try { json = await resp.json(); } catch { throw new Error('Respons server tidak valid.'); }
         if (!json.success) {
-          throw new Error(json.error || 'Gagal mengambil stories.');
+          throw new Error(json.error || 'Gagal mengambil konten.');
         }
 
         gResults = json.data;
-        // Simpan ke riwayat dengan format URL khusus agar mudah dikenali
-        const pseudoUrl = `tiktok.com/@${username}/stories`;
+        // Simpan ke riwayat
+        const pseudoUrl = `${currentSource}:${username}`;
         saveHist([pseudoUrl], gResults);
         hideSkeleton();
 
         // Hide empty state
-        const emptyEl = document.getElementById('emptyState');
-        if (emptyEl) emptyEl.style.display = 'none';
+        const emptyEl2 = document.getElementById('emptyState');
+        if (emptyEl2) emptyEl2.style.display = 'none';
 
         // Show result badge counter
         const totalMedia = gResults.reduce((sum, d) => sum + (d.mediaItems ? d.mediaItems.length : 0), 0);
-        const badgeEl = document.getElementById('resultBadge');
-        if (badgeEl) { badgeEl.innerHTML = `✓ ${gResults.length} stories · ${totalMedia} media`; badgeEl.style.display = 'inline-flex'; }
+        const badgeEl2 = document.getElementById('resultBadge');
+        if (badgeEl2) { badgeEl2.innerHTML = `\u2713 ${gResults.length} hasil \u00B7 ${totalMedia} media`; badgeEl2.style.display = 'inline-flex'; }
 
         gResults.forEach(d => rc.appendChild(makeCard(d)));
         renderFilterTabs();
         updateFab();
         if (gResults.length > 1 || (gResults[0] && gResults[0].mediaItems.length > 1)) bb.style.display = 'flex';
         showConfetti();
-        showToast(`${gResults.length} stories ditemukan!`, 'success');
+        showToast(`${gResults.length} hasil ditemukan!`, 'success');
       } catch (err) {
         hideSkeleton();
         if (err.name === 'AbortError') showErr('Timeout — server terlalu lama.\nCoba lagi nanti.');
@@ -3183,7 +4233,7 @@
       el.className = `card pf-${data.platform || 'unknown'}`;
       const a = data.author || 'unknown';
       const init = a[0].toUpperCase();
-      const pn = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', twitter: 'X (Twitter)', spotify: 'Spotify', pinterest: 'Pinterest', threads: 'Threads' };
+      const pn = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', twitter: 'X (Twitter)', spotify: 'Spotify', pinterest: 'Pinterest', threads: 'Threads', vkontakte: 'VKontakte', viday: 'Viday', videy: 'Videy', vihey: 'Vihey', vizey: 'Vizey', slicidrive: 'Slicidrive' };
       const p = data.platform || 'unknown';
       const svgVid = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>';
       const svgAlb = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;vertical-align:-1px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
@@ -3211,19 +4261,28 @@
           <span class="tag type">${typeIcon}</span>
         </div>
       </div>
-    </div>`;
+    </div>
+    ${data.warning ? `<div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:8px"><span>⚠️</span><span>${esc(data.warning)}</span></div>` : ''}`;
 
       const totalItems = data.mediaItems.length;
       data.mediaItems.forEach((item, idx) => {
         const mediaIdx = idx + 1;
         const thu = item.thumbnail || item.url;
-        // Jika base64 data: URL atau local URL, gunakan langsung tanpa proxy
-        const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp')))
+        // Jika base64 data: URL, local URL, atau known CDN — gunakan langsung tanpa proxy
+        const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp') || thu.startsWith('/api/yt-')
+            || thu.includes('slicedrive.com') || thu.includes('viday.de') || thu.includes('videy.co') || thu.includes('videy.llc') || thu.includes('vihey.co') || thu.includes('bokepbox.media') || thu.includes('bokepbox.tv') || thu.includes('vizey.de') || thu.includes('slicidrive.de')))
           ? thu
           : `${API}/api/proxy?url=${encodeURIComponent(thu)}&inline=true`;
+        // Deteksi apakah thumbnail adalah URL video (mp4/webm) — gunakan server-side frame extraction
+        const isVideoThumb = /\.(mp4|webm|m4v|mov)(\?|$)/i.test(proxy) || proxy === item.url && item.type === 'video';
+        const thumbSrc = isVideoThumb ? `${API}/api/video-thumb?url=${encodeURIComponent(proxy)}` : proxy;
+        const thumbEl = isVideoThumb
+          ? `<img src="${thumbSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;background:var(--surface2)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>`
+          : `<img src="${proxy}" loading="lazy" onerror="this.style.display='none'" />`;
         const prevTitle = esc(data.title || a || 'Media');
         const safeMediaUrl = (item.url || '').replace(/'/g, "\\'");
         const encT = encodeURIComponent(data.title || a || 'media');
+        const shB64 = item.sharedHeaders ? btoa(unescape(encodeURIComponent(JSON.stringify(item.sharedHeaders)))) : '';
 
         const miniPlay = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right:2px;vertical-align:-1px"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
         let typeBadgeStr = item.type === 'video' ? `<span style="position:absolute;top:6px;left:6px;background:var(--red);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:bold;z-index:10;">VIDEO</span>` : `<span style="position:absolute;top:6px;left:6px;background:var(--cyan);color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:bold;z-index:10;">FOTO</span>`;
@@ -3254,7 +4313,8 @@
               : '';
             if (f.needsMerge && f.audioUrl) {
               const au = (f.audioUrl || '').replace(/'/g, "\\'");
-              fmtHtml += `<button class="${cls}" onclick="dlMergeVideo('${su}','${au}','${p}','${f.ext}',this,'${encT}')">
+              const shArg = shB64 ? `,'${shB64}'` : '';
+              fmtHtml += `<button class="${cls}" onclick="dlMergeVideo('${su}','${au}','${p}','${f.ext}',this,'${encT}'${shArg})">
               <span style="display:flex;align-items:center;gap:4px">${ico} ${f.quality} <span style="font-size:9px;opacity:0.7;background:var(--accent-dim);padding:1px 6px;border-radius:100px">merge</span></span><span>${svgDl}</span>
             </button>`;
             } else {
@@ -3301,8 +4361,8 @@
         const counterBadge = totalItems > 1 ? `<span class="carousel-counter">${mediaIdx}/${totalItems}</span>` : '';
         html += `<div class="media-item" data-media-type="${item.type || 'image'}">
         <div class="thumb-row">
-          <div class="thumb" onclick="openPrev('${safeMediaUrl}','${item.type}','${prevTitle}')" style="position:relative">
-            <img src="${proxy}" loading="lazy" />${badge}${playOvr}${counterBadge}
+          <div class="thumb" onclick="openPrev('${safeMediaUrl}','${item.type}','${prevTitle}','${(item.audioUrl || '').replace(/'/g, "\\'")}'${shB64 ? `,'${shB64}'` : ''})" style="position:relative">
+            ${thumbEl}${badge}${playOvr}${counterBadge}
           </div>
           <div class="thumb-info">
             <div class="thumb-info-title">${item.type === 'video' ? 'Video' : 'Foto'}${item.duration ? ' • ' + fmtDur(item.duration) : ''}</div>
@@ -3363,7 +4423,7 @@
             u = vf.url; e = vf.ext;
           }
           const fn = `${data.platform || 'media'}_${count + 1}_${Date.now()}.${e}`;
-          const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp') || u.startsWith('data:'))
+          const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp') || u.startsWith('data:') || u.startsWith('/api/yt-'))
             ? u
             : `${API}/api/proxy?url=${encodeURIComponent(u)}`;
           tasks.push({ url: proxy, filename: fn });
@@ -3413,8 +4473,9 @@
         return;
       }
 
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
-        ? url  // Local URLs (from yt-dlp) - download directly
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+          || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
+        ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       const ld = document.getElementById('statusLoad');
@@ -3441,6 +4502,13 @@
       a.remove();
     }
 
+    function dlVideoSearch(btn, encVideoId, encTitle) {
+      const select = btn.closest('.search-result-actions').querySelector('.search-quality');
+      const fmtId = select ? select.value : 'best[ext=mp4]';
+      const fmtEnc = encodeURIComponent(fmtId);
+      dlFile(`/api/yt-download?videoId=${encVideoId}&formatId=${fmtEnc}`,'youtube','mp4',btn,encTitle);
+    }
+
     function dlFile(url, plat, ext, btn, encTitle) {
       let t = encTitle ? decodeURIComponent(encTitle) : '';
       let safe = t.replace(/[^a-zA-Z0-9_\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 50) || Date.now();
@@ -3464,8 +4532,9 @@
         return;
       }
 
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
-        ? url  // Local URLs (from yt-dlp) - download directly
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+          || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
+        ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       if (!btn) { const a = document.createElement('a'); a.href = proxy; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); return; }
@@ -3568,11 +4637,55 @@
       a.remove();
     }
 
-    function dlMergeVideo(videoUrl, audioUrl, plat, ext, btn, encTitle) {
+    async function fetchSearchLyrics(titleEnc, channelEnc) {
+      const title = titleEnc ? decodeURIComponent(titleEnc) : '';
+      const channel = channelEnc ? decodeURIComponent(channelEnc) : '';
+      const searchTerm = channel ? `${channel} ${title}` : title;
+      const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(channel || '')}/${encodeURIComponent(title)}`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('not found');
+        const j = await r.json();
+        if (!j.lyrics) throw new Error('empty');
+        const m = document.getElementById('lyricsModal');
+        const b = document.getElementById('lyricsBody');
+        const t = document.getElementById('lyricsTitle');
+        t.textContent = `${title} — ${channel || 'Unknown'}`;
+        b.textContent = j.lyrics.replace(/\n\n+/g, '\n\n');
+        m.classList.add('open');
+        document.body.style.overflow = 'hidden';
+      } catch (e) {
+        // fallback: coba pakai pencarian
+        try {
+          const r2 = await fetch(`https://lyrist.vercel.app/api/${encodeURIComponent(title)}/${encodeURIComponent(channel || '')}`);
+          if (!r2.ok) throw new Error('not found');
+          const j2 = await r2.json();
+          if (!j2.lyrics) throw new Error('empty');
+          const m = document.getElementById('lyricsModal');
+          const b = document.getElementById('lyricsBody');
+          const t = document.getElementById('lyricsTitle');
+          t.textContent = `${title} — ${channel || 'Unknown'}`;
+          b.textContent = j2.lyrics.replace(/\n\n+/g, '\n\n');
+          m.classList.add('open');
+          document.body.style.overflow = 'hidden';
+        } catch (e2) {
+          alert(`Lirik tidak ditemukan untuk: ${title}`);
+        }
+      }
+    }
+
+    function closeLyrics() {
+      const m = document.getElementById('lyricsModal');
+      m.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    function dlMergeVideo(videoUrl, audioUrl, plat, ext, btn, encTitle, sharedHeadersB64) {
       let t = encTitle ? decodeURIComponent(encTitle) : '';
       let safe = t.replace(/[^a-zA-Z0-9_\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 50) || Date.now();
       const fn = `${plat || 'media'}_${safe}_HD.${ext || 'mp4'}`;
-      const endpoint = `${API}/api/merge-video?videoUrl=${encodeURIComponent(videoUrl)}&audioUrl=${encodeURIComponent(audioUrl)}&filename=${encodeURIComponent(fn)}`;
+      let endpoint = `${API}/api/merge-video?videoUrl=${encodeURIComponent(videoUrl)}&audioUrl=${encodeURIComponent(audioUrl)}&filename=${encodeURIComponent(fn)}`;
+      if (sharedHeadersB64) endpoint += `&hdr=${encodeURIComponent(sharedHeadersB64)}`;
 
       if (!btn) {
         const a = document.createElement('a'); a.href = endpoint; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); return;
@@ -3684,8 +4797,9 @@
       let t = encT ? decodeURIComponent(encT) : '';
       let safe = t.replace(/[^a-zA-Z0-9_\s-]/g, '').trim().replace(/\s+/g, '_').substring(0, 50) || Date.now();
       const fn = `mediaget_${safe}.${ext}`;
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
-        ? url  // Local URLs (from yt-dlp) - download directly
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+          || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
+        ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
 
       alert("Pastikan aplikasi Google Drive terinstal. Setelah mendownload file, klik tombol 'Bagikan' (Share) dan pilih ikon Google Drive.");
@@ -3831,8 +4945,9 @@
     let qrObj = null;
     function showQr(url, plat, ext, encT) {
       const fn = `${plat || 'media'}_${Date.now()}.${ext || 'bin'}`;
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp'))
-        ? url  // Local URLs (from yt-dlp) - download directly
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+          || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
+        ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
       document.getElementById('qrcode').innerHTML = '';
       qrObj = new QRCode(document.getElementById('qrcode'), {
@@ -3877,7 +4992,7 @@
               u = vf.url; e = vf.ext;
             }
             const fn = `${d.platform || 'media'}_${count + 1}_${Date.now()}.${e}`;
-            const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp'))
+            const proxy = (u.startsWith('http://localhost') || u.startsWith('/temp') || u.startsWith('/api/yt-'))
               ? u
               : `${API}/api/proxy?url=${encodeURIComponent(u)}`;
             tasks.push({ url: proxy, filename: fn });
@@ -4136,6 +5251,55 @@
       }
     });
 
+
+    // ═══════════ BUG REPORT LOGIC ═══════════
+    function openReportModal() {
+      const currUrl = document.getElementById('urlInput').value.trim();
+      if (currUrl) document.getElementById('reportUrl').value = currUrl;
+      document.getElementById('reportModal').classList.add('open');
+    }
+
+    function closeReportModal() {
+      document.getElementById('reportModal').classList.remove('open');
+      document.getElementById('reportForm').reset();
+    }
+
+    document.getElementById('reportModal').addEventListener('click', e => { 
+      if (e.target === e.currentTarget) closeReportModal(); 
+    });
+
+    async function submitReport(e) {
+      e.preventDefault();
+      
+      const btn = document.getElementById('reportSubmitBtn');
+      const url = document.getElementById('reportUrl').value.trim();
+      const desc = document.getElementById('reportDesc').value.trim();
+      
+      btn.innerText = "Mengirim...";
+      btn.disabled = true;
+
+      try {
+        const response = await fetch('/api/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url, description: desc })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+          showToast("Laporan berhasil dikirim! Terima kasih.", "success");
+          closeReportModal();
+        } else {
+          showToast("Gagal mengirim: " + (data.error || "Kesalahan server"), "error");
+        }
+      } catch (err) {
+        console.error("Report error:", err);
+        showToast("Terjadi kesalahan jaringan", "error");
+      } finally {
+        btn.innerText = "Kirim Laporan";
+        btn.disabled = false;
+      }
+    }
 
     // ═══════════ KEYBOARD ═══════════
     document.getElementById('urlInput').addEventListener('keydown', e => {
