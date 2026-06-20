@@ -139,9 +139,10 @@ const PLATFORMS = {
     name: "Videy",
     icon: "🎬",
     hostPatterns: [
-      /^(www\.)?videy\.(co|llc)$/,
+      /^(www\.)?videy\.(co|llc|it)$/,
       /^(www\.)?vihey\.(co|llc)$/,
       /^cdn2\.vihey\.co$/,
+      /^cdn2\.videy\.it$/,
     ],
     pathPatterns: [],
     requiresPath: false,
@@ -174,19 +175,17 @@ const PLATFORMS = {
     pathPatterns: [],
     requiresPath: false,
   },
-  playmogo: {
-    name: "Playmogo",
-    icon: "🎬",
+  ucweb: {
+    name: "UC Drive",
+    icon: "☁️",
     hostPatterns: [
-      /^(www\.)?playmogo\.com$/,
-      /^(www\.)?dood\.(watch|stream|wf|pm|re|wf|so)$/,
-      /^(www\.)?doodstream\.com$/,
+      /^(www\.)?drive\.ucweb\.com$/,
+      /^(www\.)?drive\.uc\.cn$/,
+      /^m-intldrive\.ucweb\.com$/,
+      /^(www\.)?uc-share\.com$/,
     ],
-    pathPatterns: [
-      /^\/e\/[a-zA-Z0-9]+/,    // /e/xxx (embed)
-      /^\/[a-zA-Z0-9]+$/,       // /xxx (direct link)
-    ],
-    requiresPath: false,
+    pathPatterns: [/\/s\//],
+    requiresPath: true,
   },
 };
 
@@ -4124,6 +4123,193 @@ async function scrapePinterestViaYtDlp(url) {
 async function scrapeVidayVidey(url, platform = "viday") {
   console.log(`[Scraper] Mengambil video dari ${platform}...`);
 
+  // ── Videy: construct CDN URL directly (SPA, no server-rendered HTML) ──
+  if (platform === "videy") {
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    // ── cdn2.videy.it: serves HTML wrapper with real video URL inside ──
+    if (hostname.includes('videy.it')) {
+      console.log(`[Scraper] Videy.it CDN URL terdeteksi, mengambil HTML untuk extract URL video...`);
+      try {
+        const htmlResp = await axios.get(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Referer": "https://videy.co/",
+          },
+          timeout: 15000,
+          responseType: "text",
+        });
+        const ct = (htmlResp.headers["content-type"] || "").toLowerCase();
+
+        // If it returns actual video (not HTML), use URL directly
+        if (ct.startsWith("video/")) {
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+          const ext = dotIdx !== -1 ? filename.substring(dotIdx + 1).toLowerCase() : 'mp4';
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{ type: "video", url, thumbnail: url, width: null, height: null, duration: null, ext, formats: [{ type: "video", quality: "HD", url, ext }] }],
+            source: "cdn-direct", warning: null,
+          };
+        }
+
+        // HTML response: extract real video URL from JavaScript
+        const html = htmlResp.data;
+        const videoUrlMatch = html.match(/const\s+videoUrl\s*=\s*["']([^"']+)["']/i)
+          || html.match(/videoUrl\s*=\s*["']([^"']+\.m[p4][^"']*)["']/i)
+          || html.match(/src\s*=\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
+
+        if (videoUrlMatch && videoUrlMatch[1]) {
+          let realVideoUrl = videoUrlMatch[1].replace(/&amp;/g, '&');
+          console.log(`[Scraper] Videy.it URL video asli: ${realVideoUrl}`);
+
+          // Normalize to HTTP for ISP-blocked regions
+          const normalizedUrl = realVideoUrl.replace(/^https:\/\//i, 'http://');
+          const ext = realVideoUrl.includes('.m3u8') ? 'm3u8' : 'mp4';
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{
+              type: "video", url: normalizedUrl, thumbnail: normalizedUrl,
+              width: null, height: null, duration: null, ext,
+              formats: [{ type: "video", quality: "HD", url: normalizedUrl, ext }],
+            }],
+            source: "videy.it-extract",
+            warning: "Video diekstrak dari halaman videy.it. Jika tidak bisa diputar, coba gunakan VPN.",
+          };
+        }
+
+        // Fallback: cari URL mp4 apapun di HTML
+        const mp4Match = html.match(/https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/i);
+        if (mp4Match) {
+          let realVideoUrl = mp4Match[0].replace(/&amp;/g, '&');
+          console.log(`[Scraper] Videy.it URL video (fallback): ${realVideoUrl}`);
+          const normalizedUrl = realVideoUrl.replace(/^https:\/\//i, 'http://');
+          const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+          const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+          const dotIdx = filename.lastIndexOf('.');
+          const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+          return {
+            platform, type: "video", shortcode: videoId, author: platform,
+            caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+            timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+            mediaItems: [{
+              type: "video", url: normalizedUrl, thumbnail: normalizedUrl,
+              width: null, height: null, duration: null, ext: 'mp4',
+              formats: [{ type: "video", quality: "HD", url: normalizedUrl, ext: 'mp4' }],
+            }],
+            source: "videy.it-extract",
+            warning: "Video diekstrak dari halaman videy.it. Jika tidak bisa diputar, coba gunakan VPN.",
+          };
+        }
+
+        throw new Error("Tidak dapat menemukan URL video di halaman videy.it");
+      } catch (err) {
+        if (err.message.includes('Tidak dapat menemukan')) throw err;
+        console.log(`[Scraper] Videy.it fetch gagal: ${err.message}, mencoba URL langsung`);
+        // Fallback: return URL as-is
+        const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+        const filename = pathParts[pathParts.length - 1] || 'video.mp4';
+        const dotIdx = filename.lastIndexOf('.');
+        const videoId = dotIdx !== -1 ? filename.substring(0, dotIdx) : filename;
+        const ext = dotIdx !== -1 ? filename.substring(dotIdx + 1).toLowerCase() : 'mp4';
+        return {
+          platform, type: "video", shortcode: videoId, author: platform,
+          caption: `Videy ${videoId}`, title: `Videy ${videoId}`,
+          timestamp: null, likeCount: 0, commentCount: 0, viewCount: 0, duration: null,
+          mediaItems: [{ type: "video", url, thumbnail: url, width: null, height: null, duration: null, ext, formats: [{ type: "video", quality: "HD", url, ext }] }],
+          source: "cdn-direct",
+          warning: "Gagal mengekstrak URL dari videy.it. URL dikembalikan apa adanya.",
+        };
+      }
+    }
+
+    // ── videy.co / videy.llc: construct CDN URL from id parameter ──
+    let videoId, ext;
+
+    if (parsedUrl.searchParams.get("id")) {
+      videoId = parsedUrl.searchParams.get("id");
+      ext = (videoId.length === 9 && videoId.endsWith("2")) ? "mov" : "mp4";
+    } else {
+      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+      const filename = pathParts[pathParts.length - 1] || '';
+      const dotIdx = filename.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        videoId = filename.substring(0, dotIdx);
+        ext = filename.substring(dotIdx + 1).toLowerCase() || 'mp4';
+      } else {
+        videoId = filename;
+        ext = 'mp4';
+      }
+    }
+
+    if (!videoId) {
+      throw new Error("URL videy tidak memiliki video ID");
+    }
+
+    const cdnUrl = `http://cdn2.videy.co/${videoId}.${ext}`;
+    console.log(`[Scraper] Videy CDN URL (constructed): ${cdnUrl}`);
+
+    try {
+      const headResp = await axios.head(cdnUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Referer": "https://videy.co/",
+        },
+        timeout: 10000,
+        validateStatus: (s) => s < 400,
+      });
+      const ct = (headResp.headers["content-type"] || "").toLowerCase();
+      if (!ct.startsWith("video/") && !ct.startsWith("application/octet-stream")) {
+        console.log(`[Scraper] Videy CDN returned non-video content-type: ${ct}, URL may be invalid`);
+      }
+    } catch (headErr) {
+      console.log(`[Scraper] Videy CDN HEAD gagal: ${headErr.message}, tetap menggunakan URL`);
+    }
+
+    const shortcode = videoId;
+    const title = `Videy ${videoId}`;
+
+    return {
+      platform,
+      type: "video",
+      shortcode,
+      author: platform,
+      caption: title,
+      title,
+      timestamp: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      duration: null,
+      mediaItems: [{
+        type: "video",
+        url: cdnUrl,
+        thumbnail: cdnUrl,
+        width: null,
+        height: null,
+        duration: null,
+        ext,
+        formats: [{ type: "video", quality: "HD", url: cdnUrl, ext }],
+      }],
+      source: "cdn-direct",
+      warning: "CDN videy menggunakan HTTP karena HTTPS diblokir ISP/SSL expired. Jika gagal, coba gunakan VPN.",
+    };
+  }
+
+  // ── Viday: scrape HTML for <source> tag ──
   const response = await axios.get(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -4232,17 +4418,6 @@ async function scrapeVidayVidey(url, platform = "viday") {
     if (ogImageMatch) thumbnail = ogImageMatch[1];
   }
 
-  // Normalisasi URL untuk videy: gunakan HTTP + cdn2 (HTTPS diblokir ISP/SSL expired)
-  if (platform === "videy") {
-    for (let i = 0; i < videoUrls.length; i++) {
-      videoUrls[i] = videoUrls[i]
-        .replace(/^https:\/\//i, 'http://')
-        .replace(/cdn\.videy\.co/i, 'cdn2.videy.co');
-    }
-  }
-
-
-
   const bestUrl = videoUrls[0];
 
   // Fallback: gunakan video URL sebagai thumbnail jika tidak ada gambar
@@ -4283,7 +4458,179 @@ async function scrapeVidayVidey(url, platform = "viday") {
       formats,
     }],
     source: "html-scrape",
-    warning: platform === "videy" ? "CDN videy.co diblokir ISP (Internet Positif). Video diambil dari cdn2.videy.co via HTTP. Jika gagal, coba gunakan VPN." : null,
+    warning: null,
+  };
+}
+
+// ─── UC Drive Scraper ─────────────────────────────────────────────────
+
+/**
+ * Scraper untuk UC Drive (drive.ucweb.com) — menggunakan API publik tanpa login.
+ * Flow: token → list files → video_preview (direct OSS URL)
+ */
+async function scrapeUcwebDrive(url) {
+  console.log(`[Scraper] Mengambil file dari UC Drive...`);
+  const API_BASE = "https://m-intldrive.ucweb.com";
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  const API_HEADERS = {
+    "User-Agent": UA,
+    "Content-Type": "application/json",
+    "Referer": "https://drive.ucweb.com/",
+    "X-U-Req-Res-Encoding": "no",  // Bypass wg encoding, return plain JSON
+  };
+
+  // Extract pwd_id from URL path: /s/{pwd_id}
+  const parsedUrl = new URL(url);
+  const pathMatch = parsedUrl.pathname.match(/\/s\/([a-zA-Z0-9]+)/);
+  if (!pathMatch) throw new Error("URL UC Drive tidak valid, format: /s/{id}");
+  const pwdId = pathMatch[1];
+  console.log(`[Scraper] UC Drive share ID: ${pwdId}`);
+
+  // Step 1: Get share token
+  let stoken;
+  try {
+    const tokenResp = await axios.post(
+      `${API_BASE}/1/clouddrive/share/sharepage/token`,
+      { pwd_id: pwdId, passcode: "" },
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    stoken = tokenResp.data?.data?.stoken;
+    if (!stoken) throw new Error("Token tidak ditemukan");
+    console.log(`[Scraper] UC Drive token berhasil`);
+  } catch (err) {
+    throw new Error(`Gagal mendapatkan token UC Drive: ${err.message}`);
+  }
+
+  // Step 2: List files (supports folders)
+  async function listFiles(pdirFid = "") {
+    const body = { pwd_id: pwdId, stoken, pdir_fid: pdirFid, page: 1, size: 100 };
+    const resp = await axios.post(
+      `${API_BASE}/1/clouddrive/share/sharepage/v2/detail?pr=UCBrowser&fr=h5`,
+      body,
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    return resp.data?.data?.detail_info?.list || resp.data?.data?.list || [];
+  }
+
+  // Step 3: Get video preview URL (no auth required)
+  async function getVideoPreview(fid, fidToken) {
+    const params = new URLSearchParams({
+      pr: "UCBrowser", fr: "h5",
+      pwd_id: pwdId, stoken,
+      fid, fid_token: fidToken, isH5: "true",
+    });
+    const resp = await axios.get(
+      `${API_BASE}/1/clouddrive/share/sharepage/video_preview?${params}`,
+      { headers: API_HEADERS, timeout: 15000 }
+    );
+    const playInfo = resp.data?.data?.play_info;
+    if (playInfo?.url) return playInfo;
+    // Fallback: check preview_url
+    if (resp.data?.data?.preview_url) return { url: resp.data.data.preview_url, resolution: "original", format: "mp4" };
+    return null;
+  }
+
+  // Collect all video files (recursively for folders)
+  const allFiles = [];
+  async function collectFiles(pdirFid = "", depth = 0) {
+    if (depth > 3) return; // limit recursion
+    const files = await listFiles(pdirFid);
+    for (const f of files) {
+      if (f.dir === true) {
+        // It's a folder, recurse
+        await collectFiles(f.fid, depth + 1);
+      } else {
+        allFiles.push(f);
+      }
+    }
+  }
+
+  await collectFiles();
+
+  if (allFiles.length === 0) {
+    throw new Error("Tidak ada file di share UC Drive ini");
+  }
+
+  console.log(`[Scraper] UC Drive: ${allFiles.length} file ditemukan`);
+
+  // Filter video files and get preview URLs
+  const mediaItems = [];
+  for (const f of allFiles) {
+    const isVideo = /\.(mp4|mkv|avi|mov|webm|flv)$/i.test(f.file_name || '') ||
+                    (f.format_type && f.format_type.includes('video')) ||
+                    (f.obj_category && f.obj_category === 'video');
+    if (!isVideo) continue;
+
+    let videoUrl = null;
+    let resolution = "original";
+    try {
+      const preview = await getVideoPreview(f.fid, f.share_fid_token);
+      if (preview?.url) {
+        videoUrl = preview.url;
+        resolution = preview.resolution || "original";
+      }
+    } catch (e) {
+      console.log(`[Scraper] UC Drive preview gagal untuk ${f.file_name}: ${e.message}`);
+    }
+
+    if (!videoUrl) continue;
+
+    const sizeBytes = f.size || 0;
+    const sizeMB = (sizeBytes / 1048576).toFixed(1);
+    const ext = (f.file_name || '').split('.').pop().toLowerCase() || 'mp4';
+
+    mediaItems.push({
+      type: "video",
+      url: videoUrl,
+      thumbnail: f.thumbnail || f.big_thumbnail || null,
+      width: f.width || null,
+      height: f.height || null,
+      duration: f.duration ? Math.round(f.duration / 1000) : null,
+      ext,
+      fileName: f.file_name || `video.${ext}`,
+      fileSize: sizeBytes,
+      formats: [{ type: "video", quality: resolution, url: videoUrl, ext }],
+    });
+  }
+
+  if (mediaItems.length === 0) {
+    // No videos found, try returning all files as generic downloads
+    for (const f of allFiles) {
+      const ext = (f.file_name || '').split('.').pop().toLowerCase() || 'bin';
+      mediaItems.push({
+        type: "file",
+        url: `https://drive.ucweb.com/s/${pwdId}`, // fallback URL
+        thumbnail: null,
+        width: null, height: null, duration: null,
+        ext,
+        fileName: f.file_name || `file.${ext}`,
+        fileSize: f.size || 0,
+        formats: [{ type: "file", quality: "original", url: `https://drive.ucweb.com/s/${pwdId}`, ext }],
+        warning: "Login UC Drive diperlukan untuk download file non-video.",
+      });
+    }
+  }
+
+  if (mediaItems.length === 0) {
+    throw new Error("Tidak ada file yang bisa didownload dari UC Drive");
+  }
+
+  const shareTitle = `UC Drive ${pwdId}`;
+  return {
+    platform: "ucweb",
+    type: mediaItems.length > 1 ? "carousel" : "video",
+    shortcode: pwdId,
+    author: "UC Drive",
+    caption: shareTitle,
+    title: shareTitle,
+    timestamp: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: null,
+    mediaItems,
+    source: "ucweb-api",
+    warning: mediaItems.some(m => m.warning) ? "Beberapa file memerlukan login UC Drive." : null,
   };
 }
 
@@ -4399,164 +4746,6 @@ async function scrapeBokepbox(url) {
       source: "direct-url",
       warning: "Gagal mengambil halaman. Mungkin diblokir ISP. Coba gunakan VPN.",
     };
-  }
-}
-
-/**
- * Scrape video dari Playmogo / DoodStream embed pages.
- * Playmogo adalah wrapper untuk DoodStream.
- *
- * Alur ekstraksi (via Playwright):
- * 1. Buka halaman embed di Playwright (bypass Cloudflare)
- * 2. Tangkap pass_md5 response yang mengembalikan partial CDN URL
- * 3. Build final video URL (partialUrl + random + token + expiry)
- */
-async function scrapePlaymogo(url) {
-  console.log(`[Scraper] Mengambil video dari Playmogo/DoodStream: ${url}`);
-
-  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-  let browser;
-  try {
-    const { chromium } = require('playwright');
-    browser = await chromium.launch({ headless: true });
-    const ctx = await browser.newContext({ userAgent: UA });
-    const page = await ctx.newPage();
-
-    // Setup response listener SEBELUM navigate
-    let passMd5Body = null;
-    let passMd5Url = null;
-
-    page.on('response', async (response) => {
-      if (response.url().includes('/pass_md5/') && response.status() === 200 && !passMd5Body) {
-        passMd5Url = response.url();
-        try {
-          const buf = await response.body();
-          const txt = buf.toString('utf-8');
-          if (txt.startsWith('http')) {
-            passMd5Body = txt;
-            console.log('[Playmogo] pass_md5 captured');
-          }
-        } catch (e) { /* silent */ }
-      }
-    });
-
-    // Navigate — gunakan domcontentloaded (lebih cepat dari load)
-    // Cloudflare challenge biasanya solved dalam beberapa detik
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (e) {
-      // Timeout OK — page mungkin masih usable
-    }
-
-    // Tunggu pass_md5 response (max 25 detik)
-    for (let i = 0; i < 25; i++) {
-      await page.waitForTimeout(1000);
-      if (passMd5Body) break;
-    }
-
-    // Jika pass_md5 belum fire tapi HTML penuh (Cloudflare solved, JS belum jalan),
-    // coba extract hash/token dari HTML dan request manual
-    if (!passMd5Body) {
-      const html = await page.content();
-      if (html.length > 500) {
-        // Cari hash dan token dari HTML
-        const hashMatch = html.match(/['"]\/pass_md5\/([^'"]+)['"]/) ||
-                          html.match(/pass_md5['"]\s*[:=]\s*['"]\/?([^'"]+)['"]/);
-        if (hashMatch) {
-          const passMd5Path = hashMatch[1];
-          const passMd5ReqUrl = `https://playmogo.com/pass_md5/${passMd5Path}`;
-          console.log('[Playmogo] Manual request:', passMd5ReqUrl.substring(0, 80));
-
-          const cookies = await ctx.cookies('https://playmogo.com');
-          const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
-
-          try {
-            const https = require('https');
-            const manualResult = await new Promise((resolve, reject) => {
-              const u = new URL(passMd5ReqUrl);
-              https.get({
-                hostname: u.hostname, path: u.pathname, method: 'GET',
-                headers: {
-                  'User-Agent': UA,
-                  'Referer': 'https://playmogo.com/',
-                  'X-Requested-With': 'XMLHttpRequest',
-                  'Cookie': cookieStr,
-                },
-                timeout: 10000,
-              }, (res) => {
-                let d = '';
-                res.on('data', c => d += c);
-                res.on('end', () => resolve(d));
-              }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('timeout')); });
-            });
-
-            if (manualResult && manualResult.startsWith('http')) {
-              passMd5Body = manualResult;
-              passMd5Url = passMd5ReqUrl;
-              console.log('[Playmogo] Manual request berhasil');
-            }
-          } catch (e) {
-            console.warn('[Playmogo] Manual request gagal:', e.message);
-          }
-        }
-      }
-    }
-
-    // Ambil metadata
-    const cookies = await ctx.cookies('https://playmogo.com');
-    const file_id = cookies.find(c => c.name === 'file_id')?.value || '';
-
-    await browser.close();
-    browser = null;
-
-    if (!passMd5Body || !passMd5Body.startsWith('http')) {
-      throw new Error("Gagal mendapatkan URL video dari pass_md5");
-    }
-
-    // Extract token dari pass_md5 URL
-    const tokenMatch = (passMd5Url || '').match(/\/pass_md5\/[^\/]+\/([a-zA-Z0-9]+)/);
-    const token = tokenMatch ? tokenMatch[1] : '';
-
-    // Build final URL: partialUrl + random10chars + ?token=xxx&expiry=timestamp
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let randomSuffix = "";
-    for (let i = 0; i < 10; i++) {
-      randomSuffix += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const expiry = Date.now();
-    const finalVideoUrl = `${passMd5Body}${randomSuffix}?token=${token}&expiry=${expiry}`;
-
-    console.log(`[Scraper] ✅ Playmogo video URL obtained (file_id: ${file_id})`);
-
-    return {
-      platform: "playmogo",
-      type: "video",
-      shortcode: file_id || "playmogo",
-      author: "Playmogo",
-      caption: "Playmogo Video",
-      title: "Playmogo Video",
-      timestamp: null,
-      likeCount: 0,
-      commentCount: 0,
-      viewCount: 0,
-      duration: null,
-      mediaItems: [{
-        type: "video",
-        url: finalVideoUrl,
-        thumbnail: null,
-        width: null,
-        height: null,
-        duration: null,
-        ext: "mp4",
-        formats: [{ type: "video", quality: "HD", url: finalVideoUrl, ext: "mp4" }],
-      }],
-      source: "playmogo-doodstream",
-      warning: null,
-    };
-  } catch (err) {
-    if (browser) { try { await browser.close(); } catch {} }
-    throw new Error(`Playmogo gagal: ${err.message}`);
   }
 }
 
@@ -6948,7 +7137,7 @@ async function scrapeMedia(url) {
   if (!detected) {
     throw new Error(
       "URL tidak valid atau platform tidak didukung. " +
-      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, Vizey, Slicidrive, Bokepbox, Bokepbox TV, Playmogo."
+      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, UC Drive, Vizey, Slicidrive, Bokepbox, Bokepbox TV."
     );
   }
 
@@ -7353,35 +7542,6 @@ async function scrapeMedia(url) {
     }
   }
 
-  if (platform === "playmogo") {
-    // Playmogo/DoodStream butuh beberapa attempt karena Cloudflare challenge tidak konsisten
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const result = await scrapePlaymogo(url);
-        console.log(`[Scraper] playmogo berhasil (attempt ${attempt}, ${result.mediaItems.length} video)`);
-        return result;
-      } catch (err) {
-        console.warn(`[Scraper] playmogo attempt ${attempt}/${MAX_RETRIES} gagal: ${err.message}`);
-        if (attempt === MAX_RETRIES) {
-          // Fallback ke yt-dlp
-          const ytdlpOk = await checkYtDlp();
-          if (ytdlpOk) {
-            try {
-              console.log(`[Scraper] playmogo fallback ke yt-dlp...`);
-              return await scrapeViaYtDlp(url, "playmogo");
-            } catch (e2) {
-              console.warn(`[Scraper] playmogo yt-dlp fallback gagal: ${e2.message}`);
-            }
-          }
-          throw new Error(`Playmogo download gagal setelah ${MAX_RETRIES} percobaan: ${err.message}`);
-        }
-        // Tunggu sebentar sebelum retry
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
-  }
-
   // Vizey & Slicidrive: URL video langsung dari CDN, tanpa scraping HTML
   if (platform === "vizey" || platform === "slicidrive") {
     const filename = url.split('/').pop().replace(/\.mp4.*/i, '') || "video";
@@ -7410,6 +7570,18 @@ async function scrapeMedia(url) {
       source: "direct-cdn",
       warning: null,
     };
+  }
+
+  // UC Drive: API-based scraper (no login required for video preview)
+  if (platform === "ucweb") {
+    try {
+      const result = await scrapeUcwebDrive(url);
+      console.log(`[Scraper] UC Drive berhasil (${result.mediaItems.length} file)`);
+      return result;
+    } catch (err) {
+      console.warn(`[Scraper] UC Drive gagal: ${err.message}`);
+      throw new Error(`UC Drive download gagal: ${err.message}`);
+    }
   }
 
   if (platform === "pinterest") {
