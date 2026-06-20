@@ -193,9 +193,11 @@ function isAllowedCdnUrl(urlString) {
       /\.viday\.de$/,                     // subdomain viday.de
       /\.videy\.co$/,                     // videy.co CDN
       /\.videy\.llc$/,                    // videy.llc
+      /\.videy\.it$/,                     // videy.it (alternate CDN)
       /\.vihey\.(co|llc)$/,              // vihey.co (alternate videy domain)
       /^cdn\.videy\.co$/,
       /^cdn2\.videy\.co$/,
+      /^cdn2\.videy\.it$/,
       /^cdn2\.vihey\.co$/,
       /\.vizey\.de$/,                     // vizey.de (videy variant)
       /^cdn2\.vizey\.de$/,
@@ -204,19 +206,11 @@ function isAllowedCdnUrl(urlString) {
       /\.bokepbox\.media$/,               // bokepbox.media CDN
       /(^|\.)bokepbox\.tv$/,              // bokepbox.tv
       /^cdn\.bokepbox\.media$/,
-      // DoodStream / Playmogo CDN
-      /\.doodcdn\.(io|com)$/,
-      /\.doodcdn\.com$/,
-      /\.doodstream\.com$/,
-      /\.cloudatacdn\.com$/,
-      /\.cloudflarestorage\.com$/,
-      /^doimg\.net$/,
-      /\.doimg\.net$/,
-      /^i\.doodcdn\.io$/,
-      /^static\.doodcdn\.io$/,
-      /^static2\.doodcdn\.io$/,
-      /^[\w-]+\.doodcdn\.io$/,
-      /^[\w-]+\.cloudatacdn\.com$/,
+      // UC Drive CDN (Alibaba OSS)
+      /\.aliyuncs\.com$/,                  // UC Drive video CDN (Alibaba OSS)
+      /\.pds\.yolicart\.com$/,             // UC Drive thumbnail CDN
+      /\.peco\.uodoo\.com$/,               // UC Drive user assets
+      /\.uc-share\.com$/,                  // uc-share.com (UC Drive mirror)
       // Local server (for yt-dlp downloaded files)
       /^localhost$/,
       /^127\.0\.0\.1$/,
@@ -273,9 +267,6 @@ function getRefererForCdn(urlString) {
     }
     if (host.includes("bokepbox")) {
       return "https://bokepbox.tv/";
-    }
-    if (host.includes("doodcdn") || host.includes("doodstream") || host.includes("cloudatacdn") || host.includes("doimg")) {
-      return "https://doodstream.com/";
     }
     if (host.includes("localhost") || host.includes("127.0.0.1")) {
       return "";
@@ -2701,7 +2692,7 @@ app.get("/api/proxy", async (req, res) => {
     const contentLength = response.headers["content-length"];
 
     // Deteksi halaman blokir ISP: jika CDN merespon HTML, redirect client langsung
-    if ((url.includes('videy.co') || url.includes('videy.llc') || url.includes('vizey.de') || url.includes('slicidrive.de') || url.includes('bokepbox')) && contentType.includes('text/html')) {
+    if ((url.includes('videy.co') || url.includes('videy.llc') || url.includes('videy.it') || url.includes('vizey.de') || url.includes('slicidrive.de') || url.includes('bokepbox')) && contentType.includes('text/html')) {
       console.warn(`[Proxy] CDN merespon HTML (blokir ISP), redirect client`);
       response.data.destroy();
       return res.redirect(302, url);
@@ -2773,7 +2764,7 @@ app.get("/api/proxy", async (req, res) => {
     console.error("[Proxy] Error:", err.message);
     if (!res.headersSent) {
       // CDN terkena blokir ISP (Internet Positif) — redirect client langsung ke CDN
-      if (url.includes('videy.co') || url.includes('videy.llc') || url.includes('vizey.de') || url.includes('slicidrive.de') || url.includes('bokepbox')) {
+      if (url.includes('videy.co') || url.includes('videy.llc') || url.includes('videy.it') || url.includes('vizey.de') || url.includes('slicidrive.de') || url.includes('bokepbox')) {
         console.warn(`[Proxy] CDN diblokir ISP, redirect client ke ${url}`);
         return res.redirect(302, url);
       }
