@@ -420,16 +420,18 @@ class TelegramBotClient {
       const mediaType = msg.video ? 'video' : msg.document ? 'document' : msg.photo ? 'photo' : null;
       if (mediaType) {
         console.log(`[Telegram] Downloading media from msg ${msg.id}: ${this._logMediaInfo(msg)}`);
-        const fileUrl = await this._getFileUrl(client, msg);
-        if (fileUrl) {
+        const fileData = await this._getFileBuffer(client, msg);
+        if (fileData) {
+          // _bufferData will be stored in job by server.js, not serialized in JSON
+          const bufItem = { buffer: fileData.buffer, mime: fileData.mime, ext: fileData.ext, filename: fileData.filename, size: fileData.size };
           if (msg.video) {
-            mediaItems.push({ type: 'video', url: fileUrl, thumbnail: null, width: msg.video.w || null, height: msg.video.h || null, duration: msg.video.duration || null, ext: 'mp4', formats: [{ type: 'video', quality: 'Original', url: fileUrl, ext: 'mp4' }] });
+            mediaItems.push({ type: 'video', url: null, thumbnail: null, width: msg.video.w || null, height: msg.video.h || null, duration: msg.video.duration || null, ext: fileData.ext, formats: [], _bufferData: bufItem });
           } else if (msg.document) {
             const mime = msg.document.mimeType || 'video/mp4';
-            const ext = mime.includes('video') ? 'mp4' : mime.includes('audio') ? 'mp3' : 'file';
-            mediaItems.push({ type: mime.includes('video') ? 'video' : mime.includes('audio') ? 'audio' : 'file', url: fileUrl, thumbnail: null, width: null, height: null, duration: null, ext, formats: [{ type: mime.includes('video') ? 'video' : 'file', quality: 'Original', url: fileUrl, ext }] });
+            const type = mime.includes('video') ? 'video' : mime.includes('audio') ? 'audio' : 'file';
+            mediaItems.push({ type, url: null, thumbnail: null, width: null, height: null, duration: null, ext: fileData.ext, formats: [], _bufferData: bufItem });
           } else if (msg.photo) {
-            mediaItems.push({ type: 'image', url: fileUrl, thumbnail: fileUrl, width: null, height: null, duration: null, ext: 'jpg', formats: [{ type: 'image', quality: 'Original', url: fileUrl, ext: 'jpg' }] });
+            mediaItems.push({ type: 'image', url: null, thumbnail: null, width: null, height: null, duration: null, ext: fileData.ext, formats: [], _bufferData: bufItem });
           }
         }
       }
@@ -513,7 +515,7 @@ class TelegramBotClient {
     return messages;
   }
 
-  async _getFileUrl(client, msg) {
+  async _getFileBuffer(client, msg) {
     const startTime = Date.now();
     try {
       console.log(`[Telegram] Starting download msg ${msg.id}...`);
@@ -523,23 +525,20 @@ class TelegramBotClient {
         progressCallback: (progress) => {
           downloaded = Number(progress);
           const mb = (downloaded / 1024 / 1024).toFixed(1);
-          if (downloaded % (512 * 1024) < 131072) { // Log every ~512KB
+          if (downloaded % (512 * 1024) < 131072) {
             console.log(`[Telegram] Download progress: ${mb} MB`);
           }
         }
       });
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (buffer) {
-        const tempDir = path.join(__dirname, 'downloads');
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
         const mime = msg.document?.mimeType || (msg.video ? 'video/mp4' : 'image/jpeg');
         const extMap = { 'video/mp4': 'mp4', 'video/x-matroska': 'mkv', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'image/jpeg': 'jpg', 'image/png': 'png' };
         const ext = extMap[mime] || 'file';
         const filename = `tg_${Date.now()}_${msg.id}.${ext}`;
-        fs.writeFileSync(path.join(tempDir, filename), buffer);
         const sizeMB = (buffer.length / 1024 / 1024).toFixed(1);
-        console.log(`[Telegram] ✅ Downloaded ${sizeMB} MB in ${elapsed}s -> ${filename}`);
-        return `/api/file/${filename}`;
+        console.log(`[Telegram] ✅ Downloaded ${sizeMB} MB in ${elapsed}s (kept in memory)`);
+        return { buffer: Buffer.from(buffer), mime, ext, filename, size: buffer.length };
       }
     } catch (err) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
