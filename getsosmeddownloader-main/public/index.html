@@ -3526,7 +3526,7 @@
         src = `${API}/api/merge-video?videoUrl=${encodeURIComponent(url)}&audioUrl=${encodeURIComponent(audioUrl)}&stream=1`;
         if (sharedHeadersB64) src += `&hdr=${encodeURIComponent(sharedHeadersB64)}`;
       } else {
-        src = (url && (url.startsWith('data:') || url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')))
+        src = (url && (url.startsWith('data:') || url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-') || url.startsWith('/api/telegram/stream')))
           ? url
           : `${API}/api/proxy?url=${encodeURIComponent(url)}&inline=true`;
       }
@@ -4517,7 +4517,7 @@
         return;
       }
 
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-') || url.startsWith('/api/telegram/stream')
           || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
         ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
@@ -4576,7 +4576,7 @@
         return;
       }
 
-      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-')
+      const proxy = (url.startsWith('http://localhost') || url.startsWith('/temp') || url.startsWith('/api/yt-') || url.startsWith('/api/telegram/stream')
           || url.includes('slicedrive.com') || url.includes('viday.de') || url.includes('videy.co') || url.includes('videy.llc') || url.includes('vihey.co') || url.includes('bokepbox.media') || url.includes('bokepbox.tv') || url.includes('vizey.de') || url.includes('slicidrive.de'))
         ? url  // Local URLs or known CDN - download directly
         : `${API}/api/proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(fn)}`;
