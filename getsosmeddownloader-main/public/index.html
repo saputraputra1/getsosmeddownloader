@@ -3666,33 +3666,77 @@
           gResults = await fetchPromise;
           
         } else {
-          // Fallback untuk platform lain (TikTok, YouTube, dll) atau jika ekstensi tidak terpasang
-          const ep = isPrivateMode ? '/api/fetch-private' : '/api/fetch';
-          const bodyPayload = isPrivateMode ? { html: text } : { urls };
+          // Check if this is a Telegram URL - use async endpoint to avoid 504
+          const isTelegramUrl = urls.some(u => /t\.me\/|telegram\.me\//i.test(u));
+          
+          if (isTelegramUrl) {
+            // Async Telegram download - poll for result
+            const tgUrl = urls.find(u => /t\.me\/|telegram\.me\//i.test(u));
+            showStatus('⏳ Memproses Telegram bot... (bisa memakan waktu 1-2 menit)');
+            
+            const startResp = await fetch(`${API}/api/telegram/download`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: tgUrl }),
+            });
+            const startJson = await startResp.json();
+            if (!startJson.success) throw new Error(startJson.error || 'Gagal memulai download Telegram');
+            
+            const jobId = startJson.jobId;
+            let attempts = 0;
+            const maxAttempts = 120; // 2 minutes max (poll every 1s)
+            let jobResult = null;
+            
+            while (attempts < maxAttempts) {
+              await new Promise(r => setTimeout(r, 1000));
+              attempts++;
+              
+              const pollResp = await fetch(`${API}/api/telegram/job/${jobId}`);
+              const pollJson = await pollResp.json();
+              
+              if (pollJson.status === 'done') {
+                jobResult = pollJson.result;
+                break;
+              } else if (pollJson.status === 'error') {
+                throw new Error(pollJson.error || 'Download Telegram gagal');
+              }
+              // Update status every 5 seconds
+              if (attempts % 5 === 0) {
+                showStatus(`⏳ Memproses Telegram bot... (${attempts}s)`);
+              }
+            }
+            
+            if (!jobResult) throw new Error('Timeout: Download Telegram terlalu lama (>2 menit)');
+            gResults = [jobResult];
+          } else {
+            // Normal flow for other platforms
+            const ep = isPrivateMode ? '/api/fetch-private' : '/api/fetch';
+            const bodyPayload = isPrivateMode ? { html: text } : { urls };
 
-          const headers = { 'Content-Type': 'application/json' };
+            const headers = { 'Content-Type': 'application/json' };
 
-          const resp = await fetch(`${API}${ep}`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(bodyPayload),
-            signal: abortCtl.signal,
-          });
+            const resp = await fetch(`${API}${ep}`, {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify(bodyPayload),
+              signal: abortCtl.signal,
+            });
 
-          if (!resp.ok) {
-            let b = ''; try { b = await resp.text(); } catch { }
-            try { const j = JSON.parse(b); throw new Error(j.error || `HTTP ${resp.status}`); }
-            catch (e) { if (e.message.includes('HTTP') || e.message.includes('Terlalu')) throw e; throw new Error(`HTTP ${resp.status}`); }
+            if (!resp.ok) {
+              let b = ''; try { b = await resp.text(); } catch { }
+              try { const j = JSON.parse(b); throw new Error(j.error || `HTTP ${resp.status}`); }
+              catch (e) { if (e.message.includes('HTTP') || e.message.includes('Terlalu')) throw e; throw new Error(`HTTP ${resp.status}`); }
+            }
+
+            let json;
+            try { json = await resp.json(); } catch { throw new Error('Respons server tidak valid.'); }
+            if (!json.success) {
+              let msg = json.error || 'Gagal.';
+              if (json.details?.length) msg += '\n' + json.details.map(d => `• ${d.error}`).join('\n');
+              throw new Error(msg);
+            }
+            gResults = json.data;
           }
-
-          let json;
-          try { json = await resp.json(); } catch { throw new Error('Respons server tidak valid.'); }
-          if (!json.success) {
-            let msg = json.error || 'Gagal.';
-            if (json.details?.length) msg += '\n' + json.details.map(d => `• ${d.error}`).join('\n');
-            throw new Error(msg);
-          }
-          gResults = json.data;
         }
 
         saveHist(urls, gResults);
@@ -4269,12 +4313,12 @@
         const mediaIdx = idx + 1;
         const thu = item.thumbnail || item.url;
         // Jika base64 data: URL, local URL, atau known CDN — gunakan langsung tanpa proxy
-        const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp') || thu.startsWith('/api/yt-')
+        const proxy = (thu && (thu.startsWith('data:') || thu.startsWith('http://localhost') || thu.startsWith('/temp') || thu.startsWith('/api/yt-') || thu.startsWith('/api/telegram/stream')
             || thu.includes('slicedrive.com') || thu.includes('viday.de') || thu.includes('videy.co') || thu.includes('videy.llc') || thu.includes('vihey.co') || thu.includes('bokepbox.media') || thu.includes('bokepbox.tv') || thu.includes('vizey.de') || thu.includes('slicidrive.de')))
           ? thu
           : `${API}/api/proxy?url=${encodeURIComponent(thu)}&inline=true`;
         // Deteksi apakah thumbnail adalah URL video (mp4/webm) — gunakan server-side frame extraction
-        const isVideoThumb = /\.(mp4|webm|m4v|mov)(\?|$)/i.test(proxy) || proxy === item.url && item.type === 'video';
+        const isVideoThumb = !thu.startsWith('/api/telegram/stream/') && (/\.(mp4|webm|m4v|mov)(\?|$)/i.test(proxy) || proxy === item.url && item.type === 'video');
         const thumbSrc = isVideoThumb ? `${API}/api/video-thumb?url=${encodeURIComponent(proxy)}` : proxy;
         const thumbEl = isVideoThumb
           ? `<img src="${thumbSrc}" loading="lazy" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;background:var(--surface2)"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>`
@@ -4650,8 +4694,8 @@
         const m = document.getElementById('lyricsModal');
         const b = document.getElementById('lyricsBody');
         const t = document.getElementById('lyricsTitle');
-        t.textContent = `${title} — ${channel || 'Unknown'}`;
-        b.textContent = j.lyrics.replace(/\n\n+/g, '\n\n');
+        t.textContent = `${title} \u2014 ${channel || 'Unknown'}`;
+        b.textContent = j.lyrics.replace(/[\r\n]+/g, '\n\n');
         m.classList.add('open');
         document.body.style.overflow = 'hidden';
       } catch (e) {
@@ -4664,8 +4708,8 @@
           const m = document.getElementById('lyricsModal');
           const b = document.getElementById('lyricsBody');
           const t = document.getElementById('lyricsTitle');
-          t.textContent = `${title} — ${channel || 'Unknown'}`;
-          b.textContent = j2.lyrics.replace(/\n\n+/g, '\n\n');
+          t.textContent = `${title} \u2014 ${channel || 'Unknown'}`;
+          b.textContent = j2.lyrics.replace(/[\r\n]+/g, '\n\n');
           m.classList.add('open');
           document.body.style.overflow = 'hidden';
         } catch (e2) {
@@ -5056,7 +5100,20 @@
     }
 
     // ═══════════ SKELETON LOADING ═══════════
-    function showSkeleton() {
+    function showStatus(msg) {
+          const rc = document.getElementById('resultsContainer');
+          let el = document.getElementById('statusMsg');
+          if (!el) {
+            el = document.createElement('div');
+            el.id = 'statusMsg';
+            el.style.cssText = 'text-align:center;padding:20px;color:var(--muted);font-size:14px;';
+            rc.innerHTML = '';
+            rc.appendChild(el);
+          }
+          el.textContent = msg;
+        }
+    
+        function showSkeleton() {
       const rc = document.getElementById('resultsContainer');
       const skel = document.createElement('div');
       skel.id = 'skeletonLoader';
