@@ -4,6 +4,7 @@
  * Express.js + yt-dlp backend
  */
 
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
@@ -65,6 +66,30 @@ if (process.env.IG_COOKIE) {
   } catch (err) {
     console.error("[System] Gagal menulis cookies dari base64 env:", err.message);
   }
+}
+
+// UC Drive cookie dari env (untuk full download via save-to-drive auth flow)
+if (process.env.UC_COOKIE) {
+  try {
+    fs.writeFileSync(path.join(cookiesDir, "uc_cookie.txt"), process.env.UC_COOKIE);
+    console.log("[System] Berhasil menulis UC cookies dari process.env.UC_COOKIE");
+  } catch (err) {
+    console.error("[System] Gagal menulis UC cookies dari env:", err.message);
+  }
+} else if (process.env.UC_COOKIE_BASE64) {
+  try {
+    const decoded = Buffer.from(process.env.UC_COOKIE_BASE64, 'base64').toString('utf8');
+    fs.writeFileSync(path.join(cookiesDir, "uc_cookie.txt"), decoded);
+    console.log("[System] Berhasil menulis UC cookies dari process.env.UC_COOKIE_BASE64");
+  } catch (err) {
+    console.error("[System] Gagal menulis UC cookies dari base64 env:", err.message);
+  }
+}
+
+// UC Drive Playwright login credentials
+if (process.env.UC_USERNAME && process.env.UC_PASSWORD) {
+  console.log("[System] UC Drive: UC_USERNAME & UC_PASSWORD terdeteksi — Playwright browser login siap");
+  console.log("[System] UC Drive: Full download via browser (bypass OSS anti-leech) tersedia");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -696,6 +721,103 @@ app.post("/api/fetch", rateLimit, async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: "Terjadi kesalahan internal server." });
     }
+  }
+});
+
+/**
+ * POST /api/telegram/setup
+ * Setup Telegram user session (perlu dilakukan sekali saja)
+ * Body: { phone: "+62xxx", apiId: "xxx", apiHash: "xxx" }
+ */
+app.post("/api/telegram/setup", rateLimit, async (req, res) => {
+  try {
+    const { phone, apiId, apiHash } = req.body;
+
+    if (!phone || !apiId || !apiHash) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Phone, API ID, dan API Hash diperlukan" 
+      });
+    }
+
+    const scraper = require('./scraper');
+    const result = await scraper.setupTelegramSession(phone, apiId, apiHash);
+
+    res.json({
+      success: result.success,
+      message: result.message
+    });
+  } catch (err) {
+    console.error('[API] Telegram setup error:', err.message);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * GET /api/telegram/status
+ * Cek status session Telegram
+ */
+app.get("/api/telegram/status", async (req, res) => {
+  try {
+    const scraper = require('./scraper');
+    const status = scraper.getTelegramSessionStatus();
+
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (err) {
+    console.error('[API] Telegram status error:', err.message);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * GET /api/file/:filename
+ * Serve downloaded Telegram files
+ */
+app.get("/api/file/:filename", (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const filename = req.params.filename;
+  const filepath = path.join(__dirname, 'downloads', filename);
+
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  res.sendFile(filepath);
+});
+
+/**
+ * POST /api/telegram/login
+ * Login ke Telegram dengan nomor telepon (interactive OTP)
+ * Body: { "phone": "+62xxx" }
+ */
+app.post("/api/telegram/login", rateLimit, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) {
+      return res.status(400).json({ success: false, error: "Nomor telepon diperlukan" });
+    }
+
+    const telegramModule = require('./telegram_client');
+    // setupNewSession membutuhkan input OTP secara interaktif via terminal
+    // Untuk API, kita return instruksi
+    res.json({
+      success: true,
+      message: 'Untuk login, jalankan: node -e "require(\'./telegram_client\').setupTelegramSession(\'' + phone + '\')" di terminal server, lalu masukkan kode OTP.',
+      note: 'Login hanya perlu dilakukan sekali saja.'
+    });
+  } catch (err) {
+    console.error('[API] Telegram login error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
