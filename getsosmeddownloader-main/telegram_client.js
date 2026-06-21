@@ -165,6 +165,13 @@ class TelegramBotClient {
       };
     }
 
+    // Overall timeout: 5 menit untuk seluruh proses (join channel + download)
+    const OVERALL_TIMEOUT = 5 * 60 * 1000;
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout: proses download bot melebihi 5 menit')), OVERALL_TIMEOUT)
+    );
+
+    const processPromise = (async () => {
     try {
       const client = await this._connect();
       let botEntity;
@@ -181,13 +188,13 @@ class TelegramBotClient {
         const sentMsg = await client.sendMessage(botEntity, { message: startMsg });
         const sentMsgId = sentMsg ? sentMsg.id : 0;
         console.log(`[Telegram] Sent message ID: ${sentMsgId}`);
-        const msgs = await this._waitForBotMessages(client, botEntity, 25000, sentMsgId);
+        const msgs = await this._waitForBotMessages(client, botEntity, 60000, sentMsgId);
         return msgs;
       };
 
       // Step 1: Send /start
       let messages = await sendStartAndWait();
-      if (messages.length === 0) throw new Error('Bot tidak merespon dalam 25 detik');
+      if (messages.length === 0) throw new Error('Bot tidak merespon dalam 60 detik');
 
       // Step 2: Check for media
       let mediaItems = await this._extractMediaFromMessages(client, messages);
@@ -196,7 +203,7 @@ class TelegramBotClient {
         return { success: true, type: 'direct', url: mediaItems[0].url, mediaItems, botInfo, source: 'telegram_bot' };
       }
 
-      // Step 3: Extract channel links from buttons and text
+      // Step 3: Extract channel links from buttons, text, and entities
       const lastText = messages.map(m => m.message || '').join('\n');
       console.log(`[Telegram] Bot response: ${lastText.substring(0, 200)}`);
 
@@ -206,27 +213,58 @@ class TelegramBotClient {
           for (const row of msg.replyMarkup.rows) {
             if (row.buttons) {
               for (const btn of row.buttons) {
-                if (btn.url) {
-                  const publicMatch = btn.url.match(/t\.me\/([\w]+)$/);
+                // Debug: log actual button structure
+                const btnUrl = btn.url || '';
+                const btnText = btn.text || '';
+                const btnData = btn.data ? 'has_callback' : 'no_callback';
+                console.log(`[Telegram] Button: text="${btnText}" url="${btnUrl}" ${btnData}`);
+
+                // Check btn.url for invite links
+                if (btnUrl && typeof btnUrl === 'string') {
+                  const publicMatch = btnUrl.match(/t\.me\/([\w]+)$/);
                   if (publicMatch && publicMatch[1] !== botUsername) {
                     channelLinks.push({ type: 'public', username: publicMatch[1] });
                     console.log(`[Telegram] Button public channel: @${publicMatch[1]}`);
                   }
-                  const privateMatch = btn.url.match(/t\.me\/\+([\w-]+)/);
+                  const privateMatch = btnUrl.match(/t\.me\/\+([\w-]+)/);
                   if (privateMatch) {
-                    channelLinks.push({ type: 'invite', url: btn.url, hash: privateMatch[1] });
-                    console.log(`[Telegram] Button private invite: ${btn.url}`);
+                    channelLinks.push({ type: 'invite', url: btnUrl, hash: privateMatch[1] });
+                    console.log(`[Telegram] Button private invite: ${btnUrl}`);
                   }
                 }
               }
             }
           }
         }
+        // Extract invite links from message entities (Telegram stores URLs here)
+        if (msg.entities && Array.isArray(msg.entities)) {
+          for (const entity of msg.entities) {
+            const entityUrl = entity.url || '';
+            if (entityUrl) {
+              const privateMatch = entityUrl.match(/t\.me\/\+([\w-]+)/);
+              if (privateMatch) {
+                channelLinks.push({ type: 'invite', url: entityUrl, hash: privateMatch[1] });
+                console.log(`[Telegram] Entity private invite: ${entityUrl}`);
+              }
+            }
+          }
+        }
+        // Extract from message text (both public and private links)
         if (msg.message) {
+          // Public channel links
           const textLinks = msg.message.match(/t\.me\/[\w]+/g) || [];
           for (const link of textLinks) {
             const m = link.match(/t\.me\/([\w]+)/);
             if (m && m[1] !== botUsername) channelLinks.push({ type: 'public', username: m[1] });
+          }
+          // Private invite links in text
+          const privateLinks = msg.message.match(/t\.me\/\+[\w-]+/g) || [];
+          for (const link of privateLinks) {
+            const m = link.match(/t\.me\/\+([\w-]+)/);
+            if (m) {
+              channelLinks.push({ type: 'invite', url: link, hash: m[1] });
+              console.log(`[Telegram] Text private invite: ${link}`);
+            }
           }
         }
       }
@@ -288,7 +326,7 @@ class TelegramBotClient {
           );
           console.log(`[Telegram] ✅ Button clicked! Waiting for response...`);
           const maxMsgId = messages.reduce((max, m) => Math.max(max, m.id), 0);
-          retryMessages = await this._waitForBotMessages(client, botEntity, 20000, maxMsgId);
+          retryMessages = await this._waitForBotMessages(client, botEntity, 60000, maxMsgId);
         } catch (cbErr) {
           console.warn(`[Telegram] Button click failed: ${cbErr.message}`);
         }
@@ -315,7 +353,7 @@ class TelegramBotClient {
             );
             console.log(`[Telegram] ✅ Button clicked! Waiting for response...`);
             const maxMsgId2 = retryMessages.reduce((max, m) => Math.max(max, m.id), 0);
-            retryMessages = await this._waitForBotMessages(client, botEntity, 20000, maxMsgId2);
+            retryMessages = await this._waitForBotMessages(client, botEntity, 60000, maxMsgId2);
           } catch (cbErr2) {
             console.warn(`[Telegram] Button click failed: ${cbErr2.message}`);
           }
@@ -371,7 +409,7 @@ class TelegramBotClient {
             await client.invoke(new Api.messages.GetBotCallbackAnswer({ peer: botEntity, msgId: finalButton.msg.id, data: finalButton.btn.data }));
             console.log(`[Telegram] ✅ Final button clicked!`);
             const maxId = retryMessages.reduce((max, m) => Math.max(max, m.id), 0);
-            finalMessages = await this._waitForBotMessages(client, botEntity, 20000, maxId);
+            finalMessages = await this._waitForBotMessages(client, botEntity, 60000, maxId);
           } catch (e) {}
         }
         if (finalMessages.length === 0) {
@@ -390,6 +428,9 @@ class TelegramBotClient {
       console.error('[Telegram] Bot interaction error:', err.message);
       throw err;
     }
+    })();
+
+    return await Promise.race([processPromise, timeoutPromise]);
   }
 
   _logMediaInfo(msg) {
