@@ -853,16 +853,16 @@ app.get("/api/file/:filename", (req, res) => {
  */
 const telegramJobs = new Map();
 
-// Cleanup old jobs every 10 minutes (free memory buffers too)
+// Cleanup old jobs every 15 minutes (free memory buffers too)
 setInterval(() => {
   const now = Date.now();
   for (const [id, job] of telegramJobs) {
-    if (now - job.createdAt > 10 * 60 * 1000) {
+    if (now - job.createdAt > 15 * 60 * 1000) {
       if (job.buffers) job.buffers.length = 0; // free memory
       telegramJobs.delete(id);
     }
   }
-}, 10 * 60 * 1000).unref();
+}, 15 * 60 * 1000).unref();
 
 /**
  * GET /api/telegram/stream/:jobId/:index
@@ -939,10 +939,14 @@ app.post("/api/telegram/download", async (req, res) => {
             job.buffers.push(item._bufferData);
             streamUrl = `/api/telegram/stream/${jobId}/${idx}`;
           }
+          // Generate thumbnail URL from video frame for video items
+          const thumbUrl = (streamUrl && (item.type === 'video' || item.type === 'document'))
+            ? `/api/video-thumb?url=${encodeURIComponent(streamUrl)}`
+            : (item.thumbnail || null);
           return {
             type: item.type || 'video',
             url: streamUrl || item.url,
-            thumbnail: item.thumbnail || null,
+            thumbnail: thumbUrl,
             ext: item.ext || 'mp4',
             width: item.width || null,
             height: item.height || null,
