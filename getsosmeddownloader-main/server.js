@@ -792,7 +792,51 @@ app.get("/api/file/:filename", (req, res) => {
     return res.status(404).json({ error: 'File not found' });
   }
 
-  res.sendFile(filepath);
+  // Determine content type
+  const ext = path.extname(filename).toLowerCase();
+  const mimeTypes = {
+    '.mp4': 'video/mp4',
+    '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg',
+    '.ogg': 'audio/ogg',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+  };
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+  // Get file size for range requests (video streaming)
+  const stat = fs.statSync(filepath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    // Partial content (for video seeking)
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = (end - start) + 1;
+
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': contentType,
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    fs.createReadStream(filepath, { start, end }).pipe(res);
+  } else {
+    // Full file
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Access-Control-Allow-Origin': '*',
+      'Accept-Ranges': 'bytes',
+    });
+
+    fs.createReadStream(filepath).pipe(res);
+  }
 });
 
 /**
