@@ -11,6 +11,34 @@ const path = require("path");
 const fs = require("fs");
 const Tiktok = require("@tobyg74/tiktok-api-dl");
 
+// Telegram client module — untuk interact dengan Telegram bots
+let _telegramClient = null;
+function getTelegramClient() {
+  if (!_telegramClient) {
+    try {
+      const tc = require("./telegram_client");
+      _telegramClient = tc.telegramClient;
+      console.log("[Scraper] Telegram client module loaded");
+    } catch (err) {
+      console.warn("[Scraper] telegram_client module tidak tersedia:", err.message);
+    }
+  }
+  return _telegramClient;
+}
+
+// UC Drive browser module — lazy load supaya Playwright hanya di-load saat dibutuhkan
+let _ucBrowser = null;
+function getUcBrowser() {
+  if (!_ucBrowser) {
+    try {
+      _ucBrowser = require("./uc_browser");
+    } catch (err) {
+      console.warn("[Scraper] uc_browser module tidak tersedia:", err.message);
+    }
+  }
+  return _ucBrowser;
+}
+
 // Default headers untuk Instagram GraphQL
 const IG_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const IG_APP_ID = "936619743392459"; // Instagram Web App ID (public)
@@ -186,6 +214,19 @@ const PLATFORMS = {
     ],
     pathPatterns: [/\/s\//],
     requiresPath: true,
+  },
+  telegram: {
+    name: "Telegram",
+    icon: "✈️",
+    hostPatterns: [
+      /^(www\.)?t\.me$/,
+      /^(www\.)?telegram\.me$/,
+      /^t\.me$/,
+    ],
+    pathPatterns: [
+      /\/[\w]+(\?.*)?$/,  // /BOT_USERNAME atau /BOT_USERNAME?start=xxx
+    ],
+    requiresPath: false,
   },
 };
 
@@ -4462,11 +4503,136 @@ async function scrapeVidayVidey(url, platform = "viday") {
   };
 }
 
+// ─── UC Drive Cookie Helper ────────────────────────────────────────────
+
+/**
+ * Mengambil UC Drive cookie dari:
+ *   1. Environment variable: UC_COOKIE (plain text)
+ *   2. Environment variable: UC_COOKIE_BASE64 (base64-encoded)
+ *   3. File: cookies/uc_cookie.txt
+ *
+ * Mendukung 3 format input:
+ *   - HTTP header: "key1=val1; key2=val2" (dipakai apa adanya)
+ *   - Netscape cookie file: hasil export dari "Get cookies.txt LOCALLY"
+ *     (auto-parse + filter hanya domain ucweb.com)
+ *   - JSON array: hasil export dari EditThisCookie
+ *
+ * Mengembalikan string cookie HTTP header atau null jika tidak tersedia.
+ */
+function getUcCookie() {
+  const fs = require('fs');
+  const path = require('path');
+
+  let raw = null;
+
+  // 1. Env var plain text
+  if (process.env.UC_COOKIE) {
+    console.log("[Scraper] UC cookie dari env UC_COOKIE");
+    raw = process.env.UC_COOKIE;
+  } else if (process.env.UC_COOKIE_BASE64) {
+    // 2. Env var base64
+    try {
+      raw = Buffer.from(process.env.UC_COOKIE_BASE64, 'base64').toString('utf8');
+      console.log("[Scraper] UC cookie dari env UC_COOKIE_BASE64");
+    } catch (err) {
+      console.warn("[Scraper] Gagal decode UC_COOKIE_BASE64:", err.message);
+    }
+  } else {
+    // 3. File cookies/uc_cookie.txt
+    const cookieFile = path.join(__dirname, 'cookies', 'uc_cookie.txt');
+    try {
+      if (fs.existsSync(cookieFile)) {
+        raw = fs.readFileSync(cookieFile, 'utf8').trim();
+        if (raw) console.log(`[Scraper] UC cookie dari file cookies/uc_cookie.txt`);
+      }
+    } catch (err) {
+      console.warn("[Scraper] Gagal membaca cookies/uc_cookie.txt:", err.message);
+    }
+  }
+
+  if (!raw) return null;
+  return parseUcCookieString(raw);
+}
+
+/**
+ * Parse cookie string dari berbagai format, filter hanya ucweb.com,
+ * return HTTP header format "key=val; key=val".
+ */
+function parseUcCookieString(raw) {
+  raw = raw.trim();
+
+  // Format 1: Netscape — baris dimulai dengan domain tanpa ":", ada tab separator
+  // Contoh: ".ucweb.com\tTRUE\t/\tTRUE\t1783243145\t__pus\tvalue"
+  if (/^[^\s#]+\t(TRUE|FALSE)\t/m.test(raw) || raw.startsWith('# Netscape')) {
+    const cookies = {};
+    const lines = raw.split(/\r?\n/);
+    for (const line of lines) {
+      if (!line || line.startsWith('#')) continue;
+      const parts = line.split('\t');
+      if (parts.length < 7) continue;
+      const domain = parts[0];
+      const name = parts[5];
+      const value = parts[6];
+      if (!name || value === undefined) continue;
+      // Hanya ambil cookie UC Drive (ucweb.com domain)
+      if (!/ucweb\.com$/i.test(domain) && !/\.ucweb\.com$/i.test(domain)) continue;
+      // Skip volatile/irrelevant cookies
+      if (/^(g_state|__itrace_wid)$/i.test(name)) continue;
+      cookies[name] = value;
+    }
+    const header = Object.entries(cookies)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
+    if (!header) {
+      console.warn("[Scraper] UC cookie (Netscape): tidak ada cookie ucweb.com di file");
+      return null;
+    }
+    console.log(`[Scraper] UC cookie parsed (Netscape): ${Object.keys(cookies).length} cookie ucweb.com`);
+    return header;
+  }
+
+  // Format 2: JSON array
+  if (raw.startsWith('[')) {
+    try {
+      const arr = JSON.parse(raw);
+      const cookies = {};
+      for (const c of arr) {
+        const domain = c.domain || '';
+        if (!/ucweb\.com/i.test(domain)) continue;
+        if (/^(g_state|__itrace_wid)$/i.test(c.name)) continue;
+        cookies[c.name] = c.value;
+      }
+      const header = Object.entries(cookies)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+      if (!header) return null;
+      console.log(`[Scraper] UC cookie parsed (JSON): ${Object.keys(cookies).length} cookie ucweb.com`);
+      return header;
+    } catch (e) {
+      console.warn("[Scraper] UC cookie JSON parse gagal, pakai apa adannya");
+    }
+  }
+
+  // Format 3: HTTP header — pakai apa adanya
+  return raw;
+}
+
 // ─── UC Drive Scraper ─────────────────────────────────────────────────
 
 /**
- * Scraper untuk UC Drive (drive.ucweb.com) — menggunakan API publik tanpa login.
- * Flow: token → list files → video_preview (direct OSS URL)
+ * Scraper untuk UC Drive (drive.ucweb.com).
+ *
+ * Flow tanpa login (default):
+ *   token → list files → video_preview (preview 2 menit)
+ *
+ * Flow dengan login (UC_COOKIE env / cookies/uc_cookie.txt):
+ *   token → list files → save-to-drive → polling task → file/download → direct URL (FULL file)
+ *
+ * UC Drive web API hanya menyediakan preview 2 menit. Full download memerlukan
+ * autentikasi user (cookie session dari login UC Drive).
+ * Cookie bisa diset via:
+ *   - Environment variable: UC_COOKIE atau UC_COOKIE_BASE64
+ *   - File: cookies/uc_cookie.txt (format Netscape / JSON string)
  */
 async function scrapeUcwebDrive(url) {
   console.log(`[Scraper] Mengambil file dari UC Drive...`);
@@ -4478,6 +4644,15 @@ async function scrapeUcwebDrive(url) {
     "Referer": "https://drive.ucweb.com/",
     "X-U-Req-Res-Encoding": "no",  // Bypass wg encoding, return plain JSON
   };
+
+  // ─── Cek ketersediaan UC cookie untuk auth ────────────────────────────
+  const ucCookie = getUcCookie();
+  const hasAuth = !!ucCookie;
+  if (hasAuth) {
+    console.log(`[Scraper] UC Drive: UC cookie tersedia, full download mode aktif.`);
+  } else {
+    console.log(`[Scraper] UC Drive: Tanpa cookie, preview-only mode. Set UC_COOKIE env untuk full download.`);
+  }
 
   // Extract pwd_id from URL path: /s/{pwd_id}
   const parsedUrl = new URL(url);
@@ -4563,11 +4738,142 @@ async function scrapeUcwebDrive(url) {
 
     let videoUrl = null;
     let resolution = "original";
+    let isPreviewTruncated = false;
     try {
       const preview = await getVideoPreview(f.fid, f.share_fid_token);
       if (preview?.url) {
         videoUrl = preview.url;
         resolution = preview.resolution || "original";
+
+        // ─── Deteksi preview truncated ───
+        // UC Drive API hanya mengembalikan preview 2 menit (low quality, ~3.8MB)
+        // bahkan untuk file asli yang 16+ menit (100+ MB). Full file hanya
+        // bisa di-download via UC Browser app (private API).
+        //
+        // Catatan: `duration` di UC Drive API (file list & play_info) satuannya DETIK,
+        // bukan milidetik. Contoh: duration=1008 → 1008 detik = 16.8 menit.
+        const previewSize = preview.size || 0;
+        const previewDurationSec = preview.duration || 0;
+        const originalDurationSec = f.duration || 0;
+        const previewMin = (previewDurationSec / 60).toFixed(1);
+        const origMin = (originalDurationSec / 60).toFixed(1);
+
+        if (
+          (f.size > 0 && previewSize > 0 && previewSize < f.size * 0.7) ||
+          (originalDurationSec > 0 && previewDurationSec > 0 && previewDurationSec < originalDurationSec * 0.7)
+        ) {
+          isPreviewTruncated = true;
+          console.log(
+            `[Scraper] UC Drive: preview truncated untuk "${f.file_name}" ` +
+            `(preview: ${(previewSize / 1048576).toFixed(1)}MB / ${previewMin}min, ` +
+            `asli: ${(f.size / 1048576).toFixed(1)}MB / ${origMin}min).`
+          );
+
+          // ─── Coba full download via auth (jika cookie tersedia) ───
+          if (hasAuth) {
+            console.log(`[Scraper] UC Drive: Mencoba full download via auth untuk "${f.file_name}"...`);
+            // share_fid_token perlu di-fetch fresh setiap request karena unstable
+            const freshFiles = await listFiles(f._pdirFid);
+            const freshFile = freshFiles.find(ff => ff.fid === f.fid);
+            const freshFidToken = freshFile?.share_fid_token || f.share_fid_token;
+            // pdir_fid dari file object — parent directory di share page
+            const savePdirFid = freshFile?.pdir_fid || f.pdir_fid || "";
+
+            const authResult = await scrapeUcwebViaAuth(
+              ucCookie, pwdId, stoken, f.fid, freshFidToken, f.file_name, savePdirFid
+            );
+            if (authResult?.url) {
+              // VERIFIKASI: OSS URL punya callback anti-leech yang sering menolak
+              // client non-browser (return 35-byte fid body alih-alih isi file).
+              // Cek apakah URL benar-benar mengirim data video dengan Range request.
+              const ossWorks = await probeUcDownloadUrl(authResult.url, UA);
+              if (ossWorks) {
+                videoUrl = authResult.url;
+                isPreviewTruncated = false;
+                resolution = "original (full)";
+                console.log(`[Scraper] UC Drive: Full download TERVERIFIKASI untuk "${f.file_name}"`);
+              } else {
+                // OSS callback block — URL valid tapi tidak bisa di-fetch dari server.
+                // COBA DOWNLOAD VIA BROWSER (Playwright) — browser punya session valid
+                // yang bisa melewati OSS callback anti-leech.
+                const ucBrowser = getUcBrowser();
+                if (ucBrowser) {
+                  console.log(`[Scraper] UC Drive: Mencoba download via Playwright browser untuk "${f.file_name}"...`);
+                  try {
+                    const tempDir = path.join(__dirname, "temp_downloads");
+                    const browserResult = await ucBrowser.downloadUcFile(
+                      authResult.url, f.file_name, f.size, tempDir
+                    );
+                    if (browserResult?.filePath && browserResult.size > 1000) {
+                      // Sukses! URL-kan sebagai file lokal → /api/proxy bisa serve
+                      const relativePath = `/temp/${path.basename(browserResult.filePath)}`;
+                      videoUrl = relativePath;
+                      isPreviewTruncated = false;
+                      resolution = "original (full via browser)";
+                      console.log(`[Scraper] UC Drive: Browser download BERHASIL untuk "${f.file_name}" (${(browserResult.size / 1048576).toFixed(1)}MB)`);
+                    } else {
+                      console.warn(`[Scraper] UC Drive: Browser download gagal (file kosong/tidak valid). Fallback ke preview.`);
+                    }
+                  } catch (browserErr) {
+                    console.warn(`[Scraper] UC Drive: Browser download error: ${browserErr.message}. Fallback ke preview.`);
+                  }
+                } else {
+                  // Tanpa Playwright module, hanya fallback ke preview
+                  console.warn(`[Scraper] UC Drive: OSS URL ada tapi callback anti-leech memblokir fetch. Fallback ke preview.`);
+                  console.warn(`[Scraper] UC Drive: Install Playwright dan set UC_USERNAME/UC_PASSWORD env untuk full download via browser.`);
+                }
+              }
+            } else if (authResult?.savedFid) {
+              // download/list API gagal tapi file sudah tersimpan di my-drive.
+              // Coba download via Playwright browser (browser punya session valid).
+              const ucBrowser = getUcBrowser();
+              if (ucBrowser) {
+                console.log(`[Scraper] UC Drive: download/list gagal, mencoba browser download dari my-drive untuk "${f.file_name}"...`);
+                try {
+                  const browserResult = await ucBrowser.downloadFromMyDrive(
+                    authResult.savedFid, f.file_name, f.size
+                  );
+                  if (browserResult?.filePath && browserResult.size > 1000) {
+                    const relativePath = `/temp/${path.basename(browserResult.filePath)}`;
+                    videoUrl = relativePath;
+                    isPreviewTruncated = false;
+                    resolution = "original (full via browser)";
+                    console.log(`[Scraper] UC Drive: Browser my-drive download BERHASIL untuk "${f.file_name}" (${(browserResult.size / 1048576).toFixed(1)}MB)`);
+                  } else {
+                    console.warn(`[Scraper] UC Drive: Browser my-drive download gagal. Fallback ke preview.`);
+                  }
+                } catch (browserErr) {
+                  console.warn(`[Scraper] UC Drive: Browser my-drive download error: ${browserErr.message}. Fallback ke preview.`);
+                }
+              } else {
+                console.warn(`[Scraper] UC Drive: Auth download gagal dan tidak ada browser. Fallback ke preview untuk "${f.file_name}"`);
+              }
+            } else {
+              console.warn(`[Scraper] UC Drive: Auth download gagal, fallback ke preview untuk "${f.file_name}"`);
+            }
+          } else {
+            // Tanpa cookie — coba Playwright login jika credentials tersedia
+            const ucBrowser = getUcBrowser();
+            if (ucBrowser && process.env.UC_USERNAME && process.env.UC_PASSWORD) {
+              console.log(`[Scraper] UC Drive: UC_USERNAME/UC_PASSWORD tersedia, mencoba full download via browser...`);
+              try {
+                // Karena tanpa cookie, kita perlu save dulu → tapi save butuh cookie.
+                // Alternative: langsung coba download OSS preview URL via browser
+                // (browser punya valid session dari login)
+                // Untuk sekarang, tetap fallback ke preview.
+                // TODO: Implementasi save-to-drive via browser context
+                console.warn(`[Scraper] UC Drive: Save-to-drive via browser belum diimplementasi. Set UC_COOKIE untuk full download.`);
+              } catch (e) {
+                console.warn(`[Scraper] UC Drive: Browser approach gagal: ${e.message}`);
+              }
+            } else {
+              resolution = "low (preview only)";
+              console.log(
+                `[Scraper] UC Drive: Set UC_COOKIE (atau UC_USERNAME + UC_PASSWORD) env untuk full download.`
+              );
+            }
+          }
+        }
       }
     } catch (e) {
       console.log(`[Scraper] UC Drive preview gagal untuk ${f.file_name}: ${e.message}`);
@@ -4585,11 +4891,21 @@ async function scrapeUcwebDrive(url) {
       thumbnail: f.thumbnail || f.big_thumbnail || null,
       width: f.width || null,
       height: f.height || null,
-      duration: f.duration ? Math.round(f.duration / 1000) : null,
+      // duration: durasi file ASLI (dari metadata), satuannya DETIK
+      duration: f.duration ? Math.round(f.duration) : null,
       ext,
       fileName: f.file_name || `video.${ext}`,
-      fileSize: sizeBytes,
+      fileSize: sizeBytes, // ukuran file ASLI, bukan preview
       formats: [{ type: "video", quality: resolution, url: videoUrl, ext }],
+      // Warning: transparansi untuk user bahwa yang didapat cuma preview
+      warning: isPreviewTruncated
+        ? "UC Drive hanya menyediakan preview 2 menit via web. File asli " +
+          `${(sizeBytes / 1048576).toFixed(1)}MB (~${Math.round((f.duration || 0) / 60)} menit). ` +
+          (hasAuth
+            ? "Auth save+download berhasil tapi URL OSS diblokir callback anti-leech untuk client non-browser — buka manual di drive.ucweb.com."
+            : "Set UC_COOKIE (atau UC_USERNAME + UC_PASSWORD) env var untuk full download.")
+        : null,
+      isPreview: isPreviewTruncated,
     });
   }
 
@@ -4630,7 +4946,308 @@ async function scrapeUcwebDrive(url) {
     duration: null,
     mediaItems,
     source: "ucweb-api",
-    warning: mediaItems.some(m => m.warning) ? "Beberapa file memerlukan login UC Drive." : null,
+    warning: mediaItems.some(m => m.isPreview)
+      ? "Beberapa file UC Drive hanya tersedia sebagai preview 2 menit." +
+        (hasAuth ? " Auth save+download OK tapi OSS callback anti-leech memblokir fetch server-side — buka manual di drive.ucweb.com." : " Set UC_COOKIE (atau UC_USERNAME + UC_PASSWORD) env var untuk full download.")
+      : (mediaItems.some(m => m.warning) ? "Beberapa file memerlukan login UC Drive." : null),
+  };
+}
+
+// ─── UC Drive Full Download via Auth (Save-to-Drive Flow) ─────────────
+
+/**
+ * Cek apakah OSS download URL UC Drive benar-benar bisa mengirim isi file.
+ *
+ * UC Drive OSS URL punya callback anti-leech (checkplay) yang memvalidasi
+ * session browser aktif. Untuk client non-browser, callback sering
+ * mengembalikan body 35-byte berisi `/:fid;` alih-alih isi file.
+ *
+ * Fungsi ini melakukan Range request kecil dan cek:
+ * - Content-Length > 1000 (bukan error body)
+ * - Content-Type video/octet/binary (bukan text/plain)
+ *
+ * @param {string} url - OSS download URL
+ * @param {string} ua - User-Agent
+ * @returns {Promise<boolean>} - true jika URL mengirim data file asli
+ */
+async function probeUcDownloadUrl(url, ua) {
+  try {
+    const resp = await axios.get(url, {
+      headers: {
+        "User-Agent": ua,
+        "Range": "bytes=0-1023",
+      },
+      timeout: 15000,
+      responseType: "arraybuffer",
+      validateStatus: () => true,
+      maxContentLength: 2048,
+      maxRedirects: 0,
+    });
+    const ct = (resp.headers["content-type"] || "").toLowerCase();
+    const len = Number(resp.headers["content-length"] || 0);
+    // Callback-blocked response: text/plain, 35 bytes
+    if (ct.includes("text/plain") || len < 1000) return false;
+    // Valid file response: video/*, application/octet-stream, binary large
+    return ct.includes("video") || ct.includes("octet-stream") ||
+           ct.includes("binary") || len > 1000 ||
+           (resp.status === 206 || resp.status === 200 && resp.data?.byteLength > 1000);
+  } catch (err) {
+    console.warn(`[Scraper] UC Drive: probe OSS URL error: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Download file UC Drive penuh via save-to-drive flow.
+ *
+ * Flow:
+ *   1. POST /1/clouddrive/share/sharepage/save — simpan file ke drive user (perlu cookie auth)
+ *   2. GET  /1/clouddrive/task — polling sampai save_as.save_as_top_fids terisi
+ *   3. POST /1/clouddrive/download/list — buat download task, poll sampai dapat download_url
+ *
+ * @param {string} cookie - UC Drive cookie string
+ * @param {string} pwdId - Share ID dari URL
+ * @param {string} stoken - Share token
+ * @param {string} fid - File ID
+ * @param {string} shareFidToken - Share fid_token (unstable, fetch fresh)
+ * @param {string} fileName - Nama file (untuk logging)
+ * @returns {Promise<{url: string, size: number}|null>} - Download URL atau null jika gagal
+ */
+	async function scrapeUcwebViaAuth(cookie, pwdId, stoken, fid, shareFidToken, fileName, pdirFid = "") {
+	  const API_BASE = "https://m-intldrive.ucweb.com";
+	  // User-Agent HARUS mengandung "UCBrowser" agar auth endpoints bekerja
+	  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 UCBrowser/13.9.0.1288";
+
+	  // Query params standar untuk semua auth endpoints (dari Playwright capture)
+	  const QUERY = "ve=&fve=1.8.8&pr=UCBrowser&fr=pc&cc=&sys=win32&ut=&ch=&pc=";
+
+	  // Headers untuk user-authenticated requests (download endpoint)
+	  // Cookie dikirim untuk endpoints yang butuh autentikasi user (file/download)
+	  const userHeaders = {
+	    "User-Agent": UA,
+	    "Content-Type": "text/plain",
+	    "Referer": "https://drive.ucweb.com/",
+	    "X-U-Req-Res-Encoding": "no",
+	    "Cookie": cookie,
+	  };
+
+	  // Step 1: Save file ke drive user
+	  // Format request ditemukan via Playwright interception — format SEBENARNYA:
+	  // - Content-Type: text/plain (BUKAN application/json)
+	  // - Body: {stoken, pwd_id, fid_list:[...], fid_token_list:[...], pdir_fid, to_pdir_fid}
+	  // - Cookie header WAJIB dikirim (Playwright tidak menampilkannya karena
+	  //   browser menambahkannya otomatis dari cookie jar)
+	  // - TIDAK mengirim x-clouddrive-st header (stoken ada di body)
+	  // - Query params tambahan: ve, fve, pr, fr, cc, sys, ut, ch, pc
+	  //
+	  // Catatan: UC Drive API sering return HTTP 404/500 tapi body berisi {code, message}
+	  // yang menjelaskan error sebenarnya (mis. 41013 = Failed to save / auth invalid).
+	  console.log(`[Scraper] UC Drive auth: Menyimpan "${fileName}" ke drive...`);
+	  let taskId;
+	  try {
+	    // Save request — Cookie WAJIB, stoken di body, Content-Type: text/plain
+	    const saveResp = await axios.post(
+	      `${API_BASE}/1/clouddrive/share/sharepage/save?ve=&fve=1.8.8&pr=UCBrowser&fr=pc&cc=&sys=win32&ut=&ch=&pc=`,
+	      JSON.stringify({
+	        stoken,
+	        pwd_id: pwdId,
+	        fid_list: [fid],
+	        fid_token_list: [shareFidToken],
+	        pdir_fid: pdirFid,  // "" untuk root share, atau folder fid untuk subfolder
+	        to_pdir_fid: "0",
+	      }),
+	      {
+	        headers: {
+	          "User-Agent": UA,
+	          "Content-Type": "text/plain",
+	          "Referer": "https://drive.ucweb.com/",
+	          "X-U-Req-Res-Encoding": "no",
+	          "Cookie": cookie,  // WAJIB — __pus untuk autentikasi user
+	          // TIDAK mengirim x-clouddrive-st — stoken ada di body
+	        },
+	        timeout: 30000,
+	      }
+	    );
+
+	    const saveData = saveResp.data;
+	    // UC Drive menggunakan field `code` (0 = sukses), bukan errno
+	    const code = saveData?.code;
+	    if (code !== 0 && code !== undefined) {
+	      const errMsg = saveData?.message || saveData?.errmsg || `code=${code}`;
+	      console.warn(`[Scraper] UC Drive save gagal: code=${code} ${errMsg}`);
+	      if (code === 41013 || code === 41030) {
+	        console.error(`[Scraper] UC Drive: Cookie expired/tidak valid (auth forbidden)`);
+	      }
+	      return null;
+	    }
+
+	    taskId = saveData?.data?.task_id;
+	    if (!taskId) {
+	      console.warn(`[Scraper] UC Drive save: tidak ada task_id di response`);
+	      return null;
+	    }
+	    console.log(`[Scraper] UC Drive auth: Save berhasil, task_id=${taskId}`);
+	  } catch (err) {
+	    // Axios error: ekstrak body JSON dari response (UC Drive sering HTTP 404 + JSON body)
+	    const errBody = err.response?.data;
+	    if (errBody) {
+      const code = errBody.code;
+      const msg = errBody.message || errBody.errmsg || 'unknown';
+      console.warn(`[Scraper] UC Drive save gagal: HTTP ${err.response.status} code=${code} ${msg}`);
+      if (code === 41013 || code === 41030) {
+        console.error(`[Scraper] UC Drive: Cookie expired/tidak valid (auth forbidden)`);
+      }
+    } else {
+      console.warn(`[Scraper] UC Drive save error: ${err.message}`);
+    }
+    return null;
+  }
+
+  // Step 2: Polling task untuk mendapatkan fid baru file di my-drive
+  // UC Drive save task selalu return status=2 (running) meskipun sudah selesai,
+  // TAPI response menyertakan `save_as.save_as_top_fids` yang berisi fid baru
+  // file setelah berhasil disalin ke drive user.
+  // Endpoint yang dipakai: GET /1/clouddrive/task?task_id=...
+  // (Bukan /task/current/list yang selalu return empty.)
+  console.log(`[Scraper] UC Drive auth: Polling save task ${taskId}...`);
+  const MAX_POLL = 15;       // max 15 attempts (save biasanya selesai < 5 detik)
+  const POLL_INTERVAL = 1500; // 1.5 detik
+  let newFid = null;
+
+  for (let i = 0; i < MAX_POLL; i++) {
+    try {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+      const taskResp = await axios.get(
+        `${API_BASE}/1/clouddrive/task?${QUERY}`,
+        { params: { task_id: taskId }, headers: userHeaders, timeout: 15000 }
+      );
+
+      const taskData = taskResp.data?.data;
+      // save_as.save_as_top_fids terisi begitu task selesai (meski status masih 2)
+      const topFids = taskData?.save_as?.save_as_top_fids || [];
+      if (topFids.length > 0) {
+        newFid = topFids[0];
+        console.log(`[Scraper] UC Drive auth: File tersimpan di my-drive (new fid=${newFid})`);
+        break;
+      }
+
+      // Cek status error eksplisit
+      const status = taskData?.status;
+      if (status === "fail" || status === "failed" || status === "error") {
+        const failMsg = taskData?.message || `status=${status}`;
+        console.warn(`[Scraper] UC Drive auth: Save task gagal: ${failMsg}`);
+        return null;
+      }
+
+      if (i % 5 === 0 && i > 0) {
+        console.log(`[Scraper] UC Drive auth: Polling... (${i + 1}/${MAX_POLL})`);
+      }
+    } catch (err) {
+      const errBody = err.response?.data;
+      const errInfo = errBody ? `code=${errBody.code} ${errBody.message || ''}` : err.message;
+      console.warn(`[Scraper] UC Drive auth: Poll error (attempt ${i + 1}): ${errInfo}`);
+    }
+  }
+
+  if (!newFid) {
+    console.warn(`[Scraper] UC Drive auth: Save task tidak menghasilkan fid baru setelah ${MAX_POLL * (POLL_INTERVAL / 1000)} detik`);
+    return null;
+  }
+
+  // Step 3: Buat download task via /download/list untuk dapatkan signed OSS URL
+  // Ini endpoint yang dipakai web app UC Drive untuk download multi-file.
+  // Body: { include_fids: [newFid] }
+  // Response: { data: { task_id: "..." } }
+  // Lalu poll /task?task_id=... sampai dapat field `download_url`.
+  //
+  // CATATAN PENTING: OSS URL yang didapat punya callback anti-leech
+  // (auth-cdn-intldrive.ucweb.com/outer/oss/checkplay) yang memvalidasi
+  // session browser aktif. Untuk user non-VIP, callback sering menolak
+  // download non-browser dan mengembalikan body fid (35 bytes) alih-alih
+  // isi file. URL tetap valid untuk browser yang sedang login UC Drive.
+
+  // Tunggu beberapa detik agar file benar-benar ter-index di drive sebelum download
+  await new Promise(r => setTimeout(r, 3000));
+
+  console.log(`[Scraper] UC Drive auth: Membuat download task untuk "${fileName}"...`);
+  let downloadUrl = null;
+
+  // Retry download/list sampai 3 kali — kadang server butuh waktu propagate file baru
+  const DL_MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= DL_MAX_RETRIES; attempt++) {
+    try {
+      // Coba dengan format body yang benar: application/json
+      const dlTaskResp = await axios.post(
+        `${API_BASE}/1/clouddrive/download/list?${QUERY}`,
+        { include_fids: [newFid] },
+        {
+          headers: {
+            ...userHeaders,
+            "Content-Type": "application/json",
+          },
+          timeout: 15000,
+        }
+      );
+
+      const dlTaskId = dlTaskResp.data?.data?.task_id;
+      if (!dlTaskId) {
+        console.warn(`[Scraper] UC Drive download/list: tidak ada task_id (attempt ${attempt})`);
+        if (attempt < DL_MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
+        break;
+      }
+
+      // Poll download task sampai dapat download_url
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const taskResp = await axios.get(
+          `${API_BASE}/1/clouddrive/task?${QUERY}`,
+          { params: { task_id: dlTaskId }, headers: userHeaders, timeout: 15000 }
+        ).catch(() => null);
+
+        const url = taskResp?.data?.data?.download_url;
+        if (url) {
+          downloadUrl = url;
+          console.log(`[Scraper] UC Drive auth: Download URL didapat untuk "${fileName}"`);
+          break;
+        }
+      }
+
+      if (downloadUrl) break;
+
+      console.warn(`[Scraper] UC Drive auth: Download task tidak menghasilkan URL (attempt ${attempt})`);
+      if (attempt < DL_MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (err) {
+      const errBody = err.response?.data;
+      if (errBody) {
+        console.warn(`[Scraper] UC Drive download/list gagal (attempt ${attempt}): HTTP ${err.response.status} code=${errBody.code} ${errBody.message || ''}`);
+      } else {
+        console.warn(`[Scraper] UC Drive download/list error (attempt ${attempt}): ${err.message}`);
+      }
+      if (attempt < DL_MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+  }
+
+  if (downloadUrl) {
+    return {
+      url: downloadUrl,
+      size: 0, // size diisi dari metadata file asli oleh caller
+    };
+  }
+
+  // download/list gagal — return saved fid supaya caller bisa coba download via browser
+  console.warn(`[Scraper] UC Drive auth: download/list gagal setelah ${DL_MAX_RETRIES} attempts. Returning saved fid untuk browser download.`);
+  return {
+    url: null,
+    savedFid: newFid,
+    size: 0,
   };
 }
 
@@ -7137,7 +7754,7 @@ async function scrapeMedia(url) {
   if (!detected) {
     throw new Error(
       "URL tidak valid atau platform tidak didukung. " +
-      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, UC Drive, Vizey, Slicidrive, Bokepbox, Bokepbox TV."
+      "Platform yang didukung: Instagram, TikTok, YouTube, Facebook, Pinterest, Threads, Viday, Videy, UC Drive, Vizey, Slicidrive, Bokepbox, Bokepbox TV, Telegram."
     );
   }
 
@@ -7638,6 +8255,75 @@ async function scrapeMedia(url) {
     }
 
     throw new Error("Tidak bisa download Threads post. Mungkin post dihapus atau private.");
+  }
+
+  // ─── TELEGRAM ─── (harus sebelum generic yt-dlp fallback)
+  if (platform === "telegram") {
+    try {
+      const telegramModule = require("./telegram_client");
+      if (!telegramModule || !telegramModule.downloadFromTelegram) {
+        throw new Error("Telegram module tidak tersedia. Pastikan telegram_client.js ada.");
+      }
+
+      console.log(`[Scraper] Memproses link Telegram: ${url}`);
+      const result = await telegramModule.downloadFromTelegram(url);
+      
+      if (result.success && result.type === 'direct') {
+        // Pass-through semua mediaItems dari telegram_client
+        const items = (result.mediaItems || []).map(item => {
+          if (item.type === 'link') {
+            // Link dari webpage/button — return sebagai external link
+            return {
+              type: 'link',
+              url: item.url,
+              thumbnail: null,
+              ext: null,
+              formats: [],
+              source: item.source || 'external'
+            };
+          }
+          // Media file (video/document/photo) — sudah di-proxy lewat server lokal
+          return {
+            type: item.type || 'video',
+            url: item.url,
+            thumbnail: item.thumbnail || null,
+            width: item.width || null,
+            height: item.height || null,
+            duration: item.duration || null,
+            ext: item.ext || 'mp4',
+            formats: item.formats || [{ type: item.type || 'video', quality: 'Original', url: item.url, ext: item.ext || 'mp4' }]
+          };
+        });
+
+        return {
+          platform: 'telegram',
+          type: items.length > 0 ? items[0].type : 'video',
+          title: 'Telegram Bot Download',
+          author: result.botInfo?.botUsername || 'Telegram Bot',
+          caption: `Download dari bot @${result.botInfo?.botUsername || 'Telegram'}`,
+          timestamp: new Date().toISOString(),
+          mediaItems: items,
+          source: 'telegram_bot'
+        };
+      } else if (result.type === 'requires_interaction') {
+        // Butuh user untuk login ke Telegram
+        const steps = result.instructions || {};
+        throw new Error(
+          `Download dari bot Telegram memerlukan sesi login.\n` +
+          `${result.message}\n\n` +
+          `Cara setup:\n` +
+          `${steps.step1 ? '1. ' + steps.step1 + '\n' : ''}` +
+          `${steps.step2 ? '2. ' + steps.step2 + '\n' : ''}` +
+          `${steps.step3 ? '3. ' + steps.step3 + '\n' : ''}` +
+          `${steps.note ? '\nCatatan: ' + steps.note : ''}`
+        );
+      } else {
+        throw new Error(result.message || "Gagal mengambil content dari Telegram bot");
+      }
+    } catch (err) {
+      console.error("[Scraper] Telegram download gagal:", err.message);
+      throw err;
+    }
   }
 
   // Cek yt-dlp tersedia
@@ -8600,4 +9286,22 @@ module.exports = {
   // YouTube helpers (exported for testing)
   scrapeYouTube,
   extractYouTubeVideoId,
+  // Telegram helpers
+  getTelegramClient,
+  parseTelegramUrl: (url) => {
+    const tcModule = require("./telegram_client");
+    return tcModule.parseTelegramUrl(url);
+  },
+  downloadFromTelegram: (url, options) => {
+    const tcModule = require("./telegram_client");
+    return tcModule.downloadFromTelegram(url, options);
+  },
+  setupTelegramSession: (phone, apiId, apiHash) => {
+    const tcModule = require("./telegram_client");
+    return tcModule.setupTelegramSession(phone, apiId, apiHash);
+  },
+  getTelegramSessionStatus: () => {
+    const tcModule = require("./telegram_client");
+    return tcModule.getTelegramSessionStatus();
+  },
 };
