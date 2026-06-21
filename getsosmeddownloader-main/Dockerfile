@@ -23,6 +23,9 @@ RUN npm install --omit=dev
 # Copy the rest of the application
 COPY . .
 
+# Create downloads directory for Telegram file serving
+RUN mkdir -p /app/downloads
+
 # Install Playwright Chromium browser (for Instagram/Pinterest scraping)
 RUN npx playwright install chromium --with-deps
 
