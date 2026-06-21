@@ -1353,14 +1353,16 @@ app.get("/api/video-thumb", async (req, res) => {
   let { url } = req.query;
   if (!url) return res.status(400).send("URL required");
 
+  let isInternalUrl = false;
   // Jika URL adalah path lokal (/api/proxy, /temp/, dll), buat full URL
   if (url.startsWith('/api/') || url.startsWith('/temp/')) {
+    isInternalUrl = true;
     const host = req.get('host') || `localhost:${PORT}`;
     const proto = req.protocol || 'http';
     url = `${proto}://${host}${url}`;
   }
 
-  if (!isAllowedCdnUrl(url)) {
+  if (!isInternalUrl && !isAllowedCdnUrl(url)) {
     return res.status(403).json({ error: "Domain tidak diizinkan" });
   }
 
@@ -1556,7 +1558,9 @@ app.get("/api/extract-audio", async (req, res) => {
   }
 
   // ── Case 2: Local temp file path ──────────────────────────────────────
+  let isInternalUrl = false;
   if (url.startsWith('/temp/')) {
+    isInternalUrl = true;
     const host = req.get('host') || `localhost:${PORT}`;
     const proto = req.protocol || 'http';
     url = `${proto}://${host}${url}`;
@@ -1564,6 +1568,7 @@ app.get("/api/extract-audio", async (req, res) => {
 
   // ── Case 2.5: Internal API URL (ytdl-proxy) — construct full URL ─────
   if (url.startsWith('/api/')) {
+    isInternalUrl = true;
     const host = req.get('host') || `localhost:${PORT}`;
     const proto = req.protocol || 'http';
     url = `${proto}://${host}${url}`;
@@ -1571,7 +1576,7 @@ app.get("/api/extract-audio", async (req, res) => {
   }
 
   // ── Case 3: External URL (CDN video) ──────────────────────────────────
-  if (!isAllowedCdnUrl(url)) {
+  if (!isInternalUrl && !isAllowedCdnUrl(url)) {
     return res.status(403).json({ error: "Domain tidak diizinkan" });
   }
 
