@@ -788,8 +788,15 @@ app.get("/api/file/:filename", (req, res) => {
   const filename = req.params.filename;
   const filepath = path.join(__dirname, 'downloads', filename);
 
+  console.log(`[FileServe] Request: ${filename} -> ${filepath}`);
+
   if (!fs.existsSync(filepath)) {
-    return res.status(404).json({ error: 'File not found' });
+    // List what's actually in the downloads folder
+    const downloadsDir = path.join(__dirname, 'downloads');
+    let files = [];
+    try { files = fs.readdirSync(downloadsDir); } catch(e) { files = [`dir not found: ${e.message}`]; }
+    console.log(`[FileServe] ❌ File not found. Downloads folder contains: ${files.join(', ')}`);
+    return res.status(404).json({ error: 'File not found', available: files });
   }
 
   // Determine content type
@@ -837,6 +844,140 @@ app.get("/api/file/:filename", (req, res) => {
 
     fs.createReadStream(filepath).pipe(res);
   }
+});
+
+/**
+ * Async Telegram Download - avoid 504 timeout
+ * POST /api/telegram/download - Start download, return job ID
+ * GET /api/telegram/job/:id - Poll for result
+ */
+const telegramJobs = new Map();
+
+// Cleanup old jobs every 10 minutes (free memory buffers too)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, job] of telegramJobs) {
+    if (now - job.createdAt > 10 * 60 * 1000) {
+      if (job.buffers) job.buffers.length = 0; // free memory
+      telegramJobs.delete(id);
+    }
+  }
+}, 10 * 60 * 1000).unref();
+
+/**
+ * GET /api/telegram/stream/:jobId/:index
+ * Serve Telegram file buffers directly from memory (bypasses Railway 403)
+ */
+app.get("/api/telegram/stream/:jobId/:index", (req, res) => {
+  const { jobId, index } = req.params;
+  const job = telegramJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job expired or not found' });
+  if (!job.buffers || !job.buffers[index]) return res.status(404).json({ error: 'File buffer not found' });
+
+  const buf = job.buffers[index];
+  const mimeTypes = {
+    'mp4': 'video/mp4', 'mkv': 'video/x-matroska', 'mp3': 'audio/mpeg',
+    'ogg': 'audio/ogg', 'jpg': 'image/jpeg', 'png': 'image/png', 'file': 'application/octet-stream'
+  };
+  const contentType = mimeTypes[buf.ext] || 'application/octet-stream';
+  const fileSize = buf.buffer.length;
+  const range = req.headers.range;
+
+  // Disposition: inline for preview, attachment for download
+  const disposition = req.query.dl === '1' ? 'attachment' : 'inline';
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = (end - start) + 1;
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': contentType,
+      'Content-Disposition': `${disposition}; filename="${buf.filename}"`,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(buf.buffer.slice(start, end + 1));
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Content-Disposition': `${disposition}; filename="${buf.filename}"`,
+      'Access-Control-Allow-Origin': '*',
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(buf.buffer);
+  }
+});
+
+app.post("/api/telegram/download", async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL diperlukan' });
+
+  const jobId = `tg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const job = { id: jobId, status: 'processing', url, createdAt: Date.now(), result: null, error: null };
+  telegramJobs.set(jobId, job);
+
+  // Return immediately (avoid 504)
+  res.json({ success: true, jobId, status: 'processing', message: 'Download started' });
+
+  // Process in background
+  (async () => {
+    try {
+      const telegramModule = require('./telegram_client');
+      const result = await telegramModule.downloadFromTelegram(url);
+      if (result.success) {
+        // Extract buffers from mediaItems, store in job.buffers (memory only)
+        job.buffers = [];
+        const mediaItems = (result.mediaItems || []).map((item, idx) => {
+          let streamUrl = null;
+          if (item._bufferData) {
+            job.buffers.push(item._bufferData);
+            streamUrl = `/api/telegram/stream/${jobId}/${idx}`;
+          }
+          return {
+            type: item.type || 'video',
+            url: streamUrl || item.url,
+            thumbnail: item.thumbnail || null,
+            ext: item.ext || 'mp4',
+            width: item.width || null,
+            height: item.height || null,
+            duration: item.duration || null,
+            formats: item.formats?.length
+              ? item.formats.map(f => ({ ...f, url: streamUrl || f.url }))
+              : [{ type: item.type || 'video', quality: 'Original', url: streamUrl || item.url, ext: item.ext || 'mp4' }]
+          };
+        });
+        job.status = 'done';
+        job.result = {
+          platform: 'telegram',
+          type: mediaItems[0]?.type || 'video',
+          title: 'Telegram Bot Download',
+          author: result.botInfo?.botUsername || 'Telegram Bot',
+          caption: `Download dari bot @${result.botInfo?.botUsername || 'Telegram'}`,
+          timestamp: new Date().toISOString(),
+          mediaItems,
+          source: 'telegram_bot'
+        };
+      } else {
+        job.status = 'error';
+        job.error = result.message || 'Download gagal';
+      }
+    } catch (err) {
+      job.status = 'error';
+      job.error = err.message;
+    }
+  })();
+});
+
+app.get("/api/telegram/job/:id", (req, res) => {
+  const job = telegramJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job tidak ditemukan' });
+  res.json({ jobId: job.id, status: job.status, result: job.result, error: job.error });
 });
 
 /**
