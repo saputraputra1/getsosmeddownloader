@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Create virtual environment and install yt-dlp + instaloader
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip3 install --no-cache-dir -U yt-dlp instaloader
+RUN pip3 install --no-cache-dir -U yt-dlp instaloader pytubefix
 
 WORKDIR /app
 
@@ -35,4 +35,4 @@ EXPOSE 3000
 ENV PORT=3000
 
 # Update yt-dlp at startup (Instagram sering ganti format)
-CMD ["sh", "-c", "yt-dlp -U --quiet 2>/dev/null || true && node server.js"]
+CMD ["sh", "-c", "yt-dlp -U --quiet 2>/dev/null || true && pip install -U pytubefix --quiet 2>/dev/null || true && node server.js"]
