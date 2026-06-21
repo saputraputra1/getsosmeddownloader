@@ -539,8 +539,7 @@ class TelegramBotClient {
         fs.writeFileSync(path.join(tempDir, filename), buffer);
         const sizeMB = (buffer.length / 1024 / 1024).toFixed(1);
         console.log(`[Telegram] ✅ Downloaded ${sizeMB} MB in ${elapsed}s -> ${filename}`);
-        const port = process.env.PORT || 5000;
-        return `http://localhost:${port}/api/file/${filename}`;
+        return `/api/file/${filename}`;
       }
     } catch (err) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
