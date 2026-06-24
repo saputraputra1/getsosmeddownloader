@@ -71,20 +71,7 @@ def main():
                 last_error = f"cookies: {str(e)}"
                 yt = None
 
-        # Mode 2: Coba berbagai client dengan use_po_token=True (WEB client)
-        if yt is None:
-            for client in ['WEB', 'WEB_EMBEDDED', 'MWEB', 'WEB_SAFARI']:
-                try:
-                    yt = YouTube(url, client=client, use_po_token=True)
-                    _ = yt.title
-                    successful_client = f"{client}+potoken"
-                    break
-                except Exception as e:
-                    last_error = str(e)
-                    yt = None
-                    continue
-
-        # Mode 3: Coba berbagai client tanpa po_token
+        # Mode 2: Coba berbagai client tanpa po_token
         if yt is None:
             for client in clients_to_try:
                 try:
@@ -141,21 +128,26 @@ def main():
         except Exception as e:
             print(json.dumps({"error": f"Gagal ambil audio: {str(e)}"}), file=sys.stderr)
 
-        # 3. Adaptive video (DASH) jika progressive kosong
-        if len(formats) == 0 or (len(formats) == 1 and formats[0]["type"] == "audio"):
-            try:
-                adaptive_video = yt.streams.filter(only_video=True).order_by('resolution').desc()
-                if adaptive_video:
-                    for s in adaptive_video:
+        # 3. Adaptive video (DASH) untuk resolusi tinggi (1080p+) — selalu ambil
+        try:
+            adaptive_video = yt.streams.filter(only_video=True).order_by('resolution').desc()
+            adaptive_added = 0
+            if adaptive_video:
+                for s in adaptive_video:
+                    # Hanya ambil resolusi >= 720p dan yang belum ada di progressive
+                    if s.resolution and s.resolution not in [f["quality"] for f in formats if f["type"] == "video"]:
                         formats.append({
                             "type": "video",
-                            "quality": s.resolution or "SD",
+                            "quality": s.resolution,
                             "url": s.url,
                             "ext": s.subtype,
                             "hasAudio": False
                         })
-            except Exception as e:
-                print(json.dumps({"error": f"Gagal ambil adaptive video: {str(e)}"}), file=sys.stderr)
+                        adaptive_added += 1
+            if adaptive_added > 0:
+                print(json.dumps({"info": f"Adaptive: {adaptive_added} format HD+ ditambahkan"}), file=sys.stderr)
+        except Exception as e:
+            print(json.dumps({"error": f"Gagal ambil adaptive video: {str(e)}"}), file=sys.stderr)
 
         # Validasi: cek apakah ada format yang valid
         if not formats:
