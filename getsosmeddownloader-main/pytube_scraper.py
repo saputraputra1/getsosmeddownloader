@@ -30,18 +30,29 @@ def main():
 
     try:
         # Daftar client untuk dicoba (urutan: yang paling mungkin bypass bot detection)
-        # ANDROID_TESTSUITE dan TV_EMBEDDED dikenal bisa bypass di beberapa kasus
+        # Prioritas: WEB (dengan po_token) > IOS > ANDROID > TV > lainnya
         clients_to_try = [
-            'ANDROID_TESTSUITE',  # Paling reliable untuk bypass bot check
-            'ANDROID_VR',
-            'TV_EMBEDDED',
-            'WEB',                # Otomatis generate PO token via nodejs
-            'ANDROID',
-            'WEB_EMBEDDED',
-            'MWEB',
-            'WEB_CREATOR',
-            'WEB_MUSIC',
-            'TV',
+            'WEB',                # Paling umum, butuh po_token untuk hindari bot check
+            'IOS',                # iOS client sering bypass
+            'ANDROID',            # Android client alternatif
+            'TV',                 # TV client (sering work untuk video terbatas)
+            'ANDROID_MUSIC',      # Music client alternatif
+            'IOS_MUSIC',          # iOS Music
+            'WEB_EMBEDDED',       # Embedded web
+            'TV_EMBEDDED',        # Embedded TV
+            'MWEB',               # Mobile web
+            'ANDROID_VR',         # VR
+            'ANDROID_TESTSUITE',  # Test suite (kadang work)
+            'WEB_CREATOR',        # Creator web
+            'WEB_MUSIC',          # Web music
+            'MEDIA_CONNECT',      # Media connect (client baru)
+            'ANDROID_PRODUCER',   # Producer
+            'IOS_CREATOR',        # iOS Creator
+            'ANDROID_CREATOR',    # Android Creator
+            'ANDROID_KIDS',       # Kids
+            'IOS_KIDS',           # iOS Kids
+            'WEB_KIDS',           # Web Kids
+            'WEB_SAFARI',         # Safari web
         ]
 
         yt = None
@@ -52,7 +63,6 @@ def main():
         if has_cookies:
             try:
                 yt = YouTube(url, use_oauth=False, allow_oauth_cache=False)
-                # Coba load cookies secara manual jika pytubefix support
                 if hasattr(yt, '_cookies'):
                     yt._cookies = COOKIES_PATH
                 _ = yt.title
@@ -61,7 +71,20 @@ def main():
                 last_error = f"cookies: {str(e)}"
                 yt = None
 
-        # Mode 2: Coba berbagai client
+        # Mode 2: Coba berbagai client dengan use_po_token=True (WEB client)
+        if yt is None:
+            for client in ['WEB', 'WEB_EMBEDDED', 'MWEB', 'WEB_SAFARI']:
+                try:
+                    yt = YouTube(url, client=client, use_po_token=True)
+                    _ = yt.title
+                    successful_client = f"{client}+potoken"
+                    break
+                except Exception as e:
+                    last_error = str(e)
+                    yt = None
+                    continue
+
+        # Mode 3: Coba berbagai client tanpa po_token
         if yt is None:
             for client in clients_to_try:
                 try:
@@ -74,7 +97,7 @@ def main():
                     yt = None
                     continue
 
-        # Mode 3: Fallback tanpa parameter client
+        # Mode 4: Fallback tanpa parameter client
         if yt is None:
             try:
                 yt = YouTube(url)
@@ -156,115 +179,6 @@ def main():
     except Exception as e:
         tb = traceback.format_exc()
         print(json.dumps({"error": f"{str(e)} | trace: {tb[:300]}"}))
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-import sys
-import json
-import traceback
-
-def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "No URL provided"}))
-        sys.exit(1)
-
-    url = sys.argv[1]
-
-    # Coba import pytubefix
-    try:
-        from pytubefix import YouTube
-    except ImportError:
-        # Fallback: coba pytube lama
-        try:
-            from pytube import YouTube
-        except ImportError:
-            print(json.dumps({"error": "pytubefix tidak terinstall. Jalankan: pip install pytubefix"}))
-            sys.exit(1)
-
-    try:
-        # Coba berbagai client secara berurutan
-        clients_to_try = ['WEB', 'ANDROID_VR', 'ANDROID', 'TV', 'WEB_CREATOR']
-        yt = None
-        last_error = None
-
-        for client in clients_to_try:
-            try:
-                yt = YouTube(url, client=client)
-                # Test akses title untuk validasi
-                _ = yt.title
-                break
-            except Exception as e:
-                last_error = str(e)
-                continue
-
-        if yt is None:
-            # Fallback: tanpa parameter client
-            try:
-                yt = YouTube(url)
-                _ = yt.title
-            except Exception as e:
-                print(json.dumps({"error": f"Semua client gagal: {last_error} | Fallback: {str(e)}"}))
-                sys.exit(1)
-
-        formats = []
-
-        # 1. Progressive streams (Video + Audio combined)
-        try:
-            progressive = yt.streams.filter(progressive=True).order_by('resolution').desc()
-            for s in progressive:
-                formats.append({
-                    "type": "video",
-                    "quality": s.resolution or "SD",
-                    "url": s.url,
-                    "ext": s.subtype,
-                    "hasAudio": True
-                })
-        except Exception as e:
-            print(json.dumps({"error": f"Gagal ambil progressive streams: {str(e)}"}), file=sys.stderr)
-
-        # 2. Audio only streams
-        try:
-            audio = yt.streams.filter(only_audio=True).order_by('abr').desc()
-            if audio:
-                best_audio = audio.first()
-                formats.append({
-                    "type": "audio",
-                    "quality": "Audio",
-                    "url": best_audio.url,
-                    "ext": best_audio.subtype
-                })
-        except Exception as e:
-            print(json.dumps({"error": f"Gagal ambil audio: {str(e)}"}), file=sys.stderr)
-
-        # 3. Adaptive video (DASH) jika progressive kosong
-        if len(formats) == 0 or (len(formats) == 1 and formats[0]["type"] == "audio"):
-            try:
-                adaptive_video = yt.streams.filter(only_video=True).order_by('resolution').desc()
-                if adaptive_video:
-                    for s in adaptive_video:
-                        formats.append({
-                            "type": "video",
-                            "quality": s.resolution or "SD",
-                            "url": s.url,
-                            "ext": s.subtype,
-                            "hasAudio": False
-                        })
-            except Exception as e:
-                print(json.dumps({"error": f"Gagal ambil adaptive video: {str(e)}"}), file=sys.stderr)
-
-        result = {
-            "title": yt.title,
-            "author": yt.author,
-            "thumbnail": yt.thumbnail_url,
-            "duration": yt.length,
-            "formats": formats
-        }
-
-        print(json.dumps(result))
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(json.dumps({"error": f"{str(e)} | trace: {tb[:200]}"}))
         sys.exit(1)
 
 if __name__ == "__main__":
