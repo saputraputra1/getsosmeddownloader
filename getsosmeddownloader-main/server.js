@@ -2135,8 +2135,8 @@ app.get("/api/yt-download", async (req, res) => {
   }
 
   // ─── Helper: Fallback via pytubefix Python stream ─────────────────────────
-  async function tryPytubeStream(res, safeVideoId, isAudio) {
-    console.log(`[YT-Download] Mencoba pytubefix Python stream untuk ${safeVideoId}...`);
+  async function tryPytubeStream(res, safeVideoId, isAudio, quality) {
+    console.log(`[YT-Download] Mencoba pytubefix Python stream untuk ${safeVideoId}${quality ? ' ('+quality+')' : ''}...`);
     const videoUrl = `https://www.youtube.com/watch?v=${safeVideoId}`;
     const mode = isAudio ? 'audio' : 'video';
 
@@ -2144,11 +2144,10 @@ app.get("/api/yt-download", async (req, res) => {
       const { spawn } = require('child_process');
       const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
 
-      const python = spawn(pythonCmd, [
-        path.join(__dirname, 'pytube_stream.py'),
-        videoUrl,
-        mode,
-      ], {
+      const streamArgs = [path.join(__dirname, 'pytube_stream.py'), videoUrl, mode];
+      if (quality) streamArgs.push(quality);
+
+      const python = spawn(pythonCmd, streamArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 300000,
       });
@@ -2571,23 +2570,45 @@ app.get("/api/yt-download", async (req, res) => {
   req.on('close', () => cleanup('client disconnect'));
 
   try {
-    // ─── Coba PyTube (pytubefix) DULU — tidak kena bot detection yt-dlp ──────────
-    console.log(`[YT-Download] Mencoba PyTube (pytubefix) untuk ${safeVideoId}...`);
-    const pytubeOk = await tryPytubeStream(res, safeVideoId, isAudio);
-    if (pytubeOk) {
-      console.log(`[YT-Download] \u2705 PyTube sukses`);
-      clearTimeout(timer);
-      cleanup('selesai-pytube');
-      return;
-    }
-    console.log(`[YT-Download] PyTube gagal, lanjut ke yt-dlp...`);
+      // ─── Coba PyTube (pytubefix) DULU — tidak kena bot detection yt-dlp ──────────
+      // Jika formatId dari pytube (pytube_720p, pytube_1080p, dll), extract quality
+      let pytubeQuality = null;
+      if (safeFormatId.startsWith('pytube_')) {
+        pytubeQuality = safeFormatId.replace('pytube_', '');
+      }
+      console.log(`[YT-Download] Mencoba PyTube (pytubefix) untuk ${safeVideoId}${pytubeQuality ? ' ('+pytubeQuality+')' : ''}...`);
+      const pytubeOk = await tryPytubeStream(res, safeVideoId, isAudio, pytubeQuality);
+      if (pytubeOk) {
+        console.log(`[YT-Download] \u2705 PyTube sukses`);
+        clearTimeout(timer);
+        cleanup('selesai-pytube');
+        return;
+      }
+      console.log(`[YT-Download] PyTube gagal, lanjut ke yt-dlp...`);
 
-    // ─── Fallback: yt-dlp (deteksi 403 dari stderr) ────────────────────────────
-    let ytdlpFailed = false;
-    let ytdlpStderr = '';
+      // ─── Skip yt-dlp jika formatId dari pytube (pytube_xxx) — pasti gagal ─
+      if (safeFormatId.startsWith('pytube_')) {
+        console.log(`[YT-Download] Skip yt-dlp (formatId dari pytube), langsung fallback...`);
+        const scraperOk = await tryScraperFallback(res, safeVideoId, isAudio);
+        if (scraperOk) {
+          clearTimeout(timer);
+          cleanup('selesai-scraper');
+          return;
+        }
+        // Jika scraper juga gagal, throw error
+        cleanup('all-fallbacks-failed');
+        if (!res.headersSent) {
+          res.status(502).json({ error: `Gagal mendownload ${safeVideoId} — semua metode fallback gagal` });
+        }
+        return;
+      }
 
-    await new Promise((resolve, reject) => {
-      if (isAudio) {
+      // ─── Fallback: yt-dlp (deteksi 403 dari stderr) ────────────────────────────
+      let ytdlpFailed = false;
+      let ytdlpStderr = '';
+
+      await new Promise((resolve, reject) => {
+        if (isAudio) {
         // ─── Mode Audio MP3 via yt-dlp ──────────────────────────────────────
         ytdlpProc = spawn("yt-dlp", [
           "-f", safeFormatId,
