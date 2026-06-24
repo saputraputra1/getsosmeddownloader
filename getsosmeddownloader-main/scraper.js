@@ -417,8 +417,9 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       break;
 
     case "youtube":
-      args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage");
+      args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js");
       args.push("--extractor-retries", "5");
+      args.push("--throttled-rate", "100M");
       break;
 
     case "tiktok":
@@ -5601,9 +5602,10 @@ async function scrapeYouTubeViaYtDlpDirect(url) {
     "--dump-single-json",
     "--no-warnings",
     "--no-playlist",
-    "--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage",
+    "--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js",
     "--no-check-certificates",
     "--extractor-retries", "5",
+    "--throttled-rate", "100M",
     "--sleep-interval", "2",
     "--max-sleep-interval", "5",
     cleanUrl
@@ -8586,8 +8588,9 @@ async function scrapeYouTubePlaylist(url) {
       '--dump-single-json',
       '--no-warnings',
       '--playlist-end', '100',
-      '--extractor-args', 'youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb;player_skip=webpage',
+      '--extractor-args', 'youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js',
       '--extractor-retries', '5',
+      '--throttled-rate', '100M',
       url,
     ], 120000);
 
