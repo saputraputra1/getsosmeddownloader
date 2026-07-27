@@ -476,25 +476,195 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js");
       args.push("--extractor-retries", "5");
       args.push("--throttled-rate", "100M");
+      // Anti-bot detection: random delay + geo-bypass + custom headers
+      args.push("--sleep-interval", "3");
+      args.push("--max-sleep-interval", "7");
+      args.push("--geo-bypass");
+      args.push("--add-header", "Accept-Language:en-US,en;q=0.9");
+      args.push("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
       args.push("-f", "bestaudio[ext=m4a]/bestaudio/best");
       break;
-  }
-
-  // Jika ada YouTube cookie file, gunakan untuk bypass bot detection
-  const ytCookieFile = (platform === "youtube" || platform === "spotify") ? getYtCookieFile() : null;
-  if (ytCookieFile) {
-    args.push("--cookies", ytCookieFile);
-    console.log(`[Scraper] Menggunakan YouTube cookies: ${path.basename(ytCookieFile)}`);
   }
 
   args.push(targetUrl);
 
   // YouTube/Facebook/Spotify (via ytsearch) mungkin butuh waktu lebih lama
   const timeout = (platform === "youtube" || platform === "facebook" || platform === "spotify") ? 90000 : 60000;
-  const raw = await runCommand("yt-dlp", args, timeout);
+
+  // Retry logic: coba tanpa cookies dulu, baru dengan cookies jika gagal
+  const ytCookieFile = (platform === "youtube" || platform === "spotify") ? getYtCookieFile() : null;
+  let raw;
+  if (ytCookieFile) {
+    try {
+      console.log(`[Scraper] Mencoba ${platform} tanpa cookies...`);
+      raw = await runCommand("yt-dlp", args, timeout);
+    } catch (err) {
+      console.log(`[Scraper] Tanpa cookies gagal, retry dengan cookies...`);
+      console.warn(`[Scraper] Error: ${err.message.substring(0, 100)}`);
+      args.push("--cookies", ytCookieFile);
+      console.log(`[Scraper] Menggunakan YouTube cookies: ${path.basename(ytCookieFile)}`);
+      raw = await runCommand("yt-dlp", args, timeout);
+    }
+  } else {
+    raw = await runCommand("yt-dlp", args, timeout);
+  }
   const info = JSON.parse(raw);
 
   return parseYtDlpOutput(info, platform);
+}
+
+/**
+ * Spotify fallback menggunakan @distube/ytdl-core (Node.js native).
+ * Flow: Spotify URL → scrape title → search YouTube (Invidious/Web) → ytdl-core.
+ * Tidak bergantung pada yt-dlp, jadi lebih tahan terhadap IP datacenter Railway.
+ */
+async function scrapeSpotifyViaYtdlCore(url) {
+  console.log("[Spotify] Mencoba @distube/ytdl-core fallback...");
+
+  // Step 1: Scrape Spotify untuk judul lagu
+  console.log("[Spotify] Mengambil metadata dari halaman Spotify...");
+  let trackTitle;
+  try {
+    const spRes = await axios.get(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      timeout: 10000
+    });
+    const titleMatch = spRes.data.match(/<title>(.*?)<\/title>/);
+    if (titleMatch && titleMatch[1]) {
+      trackTitle = titleMatch[1]
+        .replace(/ - song and lyrics by /i, " ")
+        .replace(/ \| Spotify/i, "")
+        .trim();
+      console.log(`[Spotify] Title ditemukan: ${trackTitle}`);
+    } else {
+      throw new Error("Tidak dapat menemukan judul lagu");
+    }
+  } catch (e) {
+    throw new Error(`Gagal mengambil metadata Spotify: ${e.message}`);
+  }
+
+  // Step 2: Cari di YouTube via Invidious API atau YouTube web search
+  let videoId = null;
+  let videoTitle = null;
+
+  console.log(`[Spotify] Mencari di YouTube: "${trackTitle}"...`);
+
+  // Invidious instances — API ringan yang return JSON
+  const invidiousInstances = [
+    `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(trackTitle)}&type=video&sort=relevance`,
+    `https://invidious.snopyta.org/api/v1/search?q=${encodeURIComponent(trackTitle)}&type=video&sort=relevance`,
+    `https://yewtu.be/api/v1/search?q=${encodeURIComponent(trackTitle)}&type=video&sort=relevance`,
+    `https://inv.riverside.rocks/api/v1/search?q=${encodeURIComponent(trackTitle)}&type=video&sort=relevance`,
+  ];
+
+  for (const inst of invidiousInstances) {
+    try {
+      const resp = await axios.get(inst, { timeout: 8000 });
+      if (resp.data && Array.isArray(resp.data) && resp.data.length > 0) {
+        const first = resp.data[0];
+        if (first.videoId) {
+          videoId = first.videoId;
+          videoTitle = first.title || trackTitle;
+          console.log(`[Spotify] Ditemukan di YouTube: "${videoTitle}" (${videoId}) via Invidious`);
+          break;
+        }
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  // Jika Invidious gagal, coba YouTube web search scrape
+  if (!videoId) {
+    console.log("[Spotify] Invidious gagal, mencoba YouTube web search...");
+    try {
+      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(trackTitle)}`;
+      const resp = await axios.get(searchUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        timeout: 10000
+      });
+      // Parse videoId dari initial data YT yang di-embed di HTML
+      const idMatch = resp.data.match(/"videoId":"([A-Za-z0-9_-]{11})"/);
+      const titleMatch2 = resp.data.match(/"title":\{"runs":\[\{"text":"([^"]+)"\}\]/);
+      if (idMatch && idMatch[1]) {
+        videoId = idMatch[1];
+        videoTitle = titleMatch2 ? titleMatch2[1] : trackTitle;
+        console.log(`[Spotify] Ditemukan di YouTube: "${videoTitle}" (${videoId}) via web search`);
+      }
+    } catch (e) {
+      console.warn(`[Spotify] YouTube web search gagal: ${e.message.substring(0, 80)}`);
+    }
+  }
+
+  if (!videoId) {
+    throw new Error("Tidak dapat menemukan lagu di YouTube — semua metode search gagal");
+  }
+
+  // Step 3: Gunakan @distube/ytdl-core untuk mendapatkan audio URL
+  console.log(`[Spotify] Mendapatkan audio dari @distube/ytdl-core...`);
+
+  const ytdl = require("@distube/ytdl-core");
+  const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
+    requestOptions: {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    },
+  });
+
+  // Cari format audio terbaik
+  const audioFormats = ytdl.filterFormats(info.formats, "audioonly")
+    .filter(f => f.container === "mp4" || f.container === "m4a" || f.container === "webm")
+    .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
+
+  if (audioFormats.length === 0) {
+    throw new Error("Tidak ada format audio tersedia dari YouTube");
+  }
+
+  const bestAudio = audioFormats[0];
+  const author = info.videoDetails.author?.name || "YouTube";
+  const thumbnail = info.videoDetails.thumbnails?.sort((a, b) => b.width - a.width)[0]?.url
+    || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  const duration = parseInt(info.videoDetails.lengthSeconds) || null;
+
+  console.log(`[Spotify] ✅ @distube/ytdl-core berhasil: "${videoTitle}" bitrate=${bestAudio.audioBitrate || '?'}kbps`);
+
+  // Build format list
+  const formats = audioFormats.map((f, i) => ({
+    type: "audio",
+    quality: i === 0 ? "Audio (Best)" : `Audio (${f.audioBitrate || '?'}kbps)`,
+    url: f.url,
+    ext: f.container === "webm" ? "webm" : "m4a",
+  }));
+
+  return {
+    platform: "spotify",
+    type: "audio",
+    shortcode: videoId,
+    author: author,
+    caption: videoTitle || trackTitle,
+    title: videoTitle || trackTitle,
+    timestamp: null,
+    likeCount: 0,
+    commentCount: 0,
+    viewCount: 0,
+    duration: duration,
+    mediaItems: [{
+      type: "audio",
+      url: bestAudio.url,
+      thumbnail: thumbnail,
+      width: null,
+      height: null,
+      duration: duration,
+      ext: bestAudio.container === "webm" ? "webm" : "m4a",
+      formats: formats,
+    }],
+    source: "ytdl-core",
+  };
 }
 
 /**
@@ -8425,6 +8595,18 @@ async function scrapeMedia(url) {
           return await scrapeViaSiputzxAPI(url);
         } catch (fbErr) {
           console.warn(`[Scraper] Facebook fallback gagal: ${fbErr.message}`);
+        }
+      }
+
+      // Spotify: gunakan @distube/ytdl-core sebagai fallback (tidak tergantung yt-dlp)
+      if (platform === "spotify") {
+        try {
+          console.log("[Spotify] Mencoba @distube/ytdl-core sebagai fallback...");
+          const result = await scrapeSpotifyViaYtdlCore(url);
+          console.log("[Spotify] ✅ Berhasil via @distube/ytdl-core fallback");
+          return result;
+        } catch (spotifyErr) {
+          console.warn(`[Spotify] @distube/ytdl-core fallback gagal: ${spotifyErr.message}`);
         }
       }
     }
