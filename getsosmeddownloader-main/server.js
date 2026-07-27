@@ -68,6 +68,24 @@ if (process.env.IG_COOKIE) {
   }
 }
 
+// YouTube cookie (untuk Spotify/YouTube download, bypass bot detection)
+if (process.env.YT_COOKIE) {
+  try {
+    fs.writeFileSync(path.join(cookiesDir, "yt_cookie.txt"), process.env.YT_COOKIE);
+    console.log("[System] Berhasil menulis YouTube cookies dari process.env.YT_COOKIE");
+  } catch (err) {
+    console.error("[System] Gagal menulis YouTube cookies dari env:", err.message);
+  }
+} else if (process.env.YT_COOKIE_BASE64) {
+  try {
+    const decoded = Buffer.from(process.env.YT_COOKIE_BASE64, 'base64').toString('utf8');
+    fs.writeFileSync(path.join(cookiesDir, "yt_cookie.txt"), decoded);
+    console.log("[System] Berhasil menulis YouTube cookies dari process.env.YT_COOKIE_BASE64");
+  } catch (err) {
+    console.error("[System] Gagal menulis YouTube cookies dari base64 env:", err.message);
+  }
+}
+
 // UC Drive cookie dari env (untuk full download via save-to-drive auth flow)
 if (process.env.UC_COOKIE) {
   try {
