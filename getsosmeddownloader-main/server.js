@@ -11,6 +11,19 @@ const axios = require("axios");
 const https = require("https");
 const path = require("path");
 const fs = require("fs");
+
+// Auto-decode YouTube cookies dari env variable (untuk Railway)
+if (process.env.YT_COOKIES_B64) {
+  try {
+    const cookiesDir = path.join(__dirname, "cookies");
+    if (!fs.existsSync(cookiesDir)) fs.mkdirSync(cookiesDir, { recursive: true });
+    const content = Buffer.from(process.env.YT_COOKIES_B64, 'base64').toString('utf-8');
+    fs.writeFileSync(path.join(cookiesDir, "youtube_cookies.txt"), content, 'utf-8');
+    console.log("[Cookies] YouTube cookies loaded from env var");
+  } catch (e) {
+    console.warn("[Cookies] Gagal decode YT_COOKIES_B64:", e.message);
+  }
+}
 const crypto = require("crypto");
 const dns = require("dns");
 const { scrapeMedia, scrapeTikTokStoriesByUsername, scrapeYouTubePlaylist, scrapeInstagramPostsByUsername, scrapeTikTokPostsByUsername, scrapeYouTube, checkYtDlp, detectPlatform, isInstagramStoryUrl, PLATFORMS } = require("./scraper");
