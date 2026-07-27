@@ -2197,6 +2197,77 @@ app.get("/api/yt-download", async (req, res) => {
       });
     });
   }
+
+  // ─── Helper: Fallback via pytubefix download-to-file + stream ────────────
+  async function tryPytubeDownloadFile(res, safeVideoId, isAudio, quality) {
+    console.log(`[YT-Download] Mencoba pytubefix download-to-file untuk ${safeVideoId}...`);
+    const videoUrl = `https://www.youtube.com/watch?v=${safeVideoId}`;
+    const mode = isAudio ? 'audio' : 'video';
+
+    try {
+      const { spawn } = require('child_process');
+      const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+
+      // Use pytube_stream.py which already handles download-to-file fallback internally
+      // This is a backup if the stream mode failed
+      const streamArgs = [path.join(__dirname, 'pytube_stream.py'), videoUrl, mode];
+      if (quality) streamArgs.push(quality);
+
+      return new Promise((resolve) => {
+        const python = spawn(pythonCmd, streamArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 300000,
+        });
+
+        let headersSet = false;
+        let dataStarted = false;
+
+        python.stdout.on('data', (chunk) => {
+          dataStarted = true;
+          if (!headersSet) {
+            headersSet = true;
+            const ext = isAudio ? 'mp3' : 'mp4';
+            const ct = isAudio ? 'audio/mpeg' : 'video/mp4';
+            res.setHeader('Content-Type', ct);
+            res.setHeader('Content-Disposition', `attachment; filename="youtube_${safeVideoId}.${ext}"`);
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Accept-Ranges', 'none');
+          }
+          res.write(chunk);
+        });
+
+        let stderr = '';
+        python.stderr.on('data', (d) => {
+          stderr += d.toString();
+        });
+
+        python.on('close', (code) => {
+          if (!dataStarted) {
+            console.warn(`[YT-Download] pytube download-file gagal (exit ${code}): ${stderr.substring(0, 200)}`);
+            if (!res.headersSent) resolve(false);
+            else resolve(true);
+          } else {
+            res.end();
+            console.log(`[YT-Download] ✅ pytube download-file selesai (exit ${code})`);
+            resolve(true);
+          }
+        });
+
+        python.on('error', (err) => {
+          console.warn(`[YT-Download] pytube download-file spawn error: ${err.message}`);
+          if (!res.headersSent) resolve(false);
+          else resolve(true);
+        });
+
+        req.on('close', () => {
+          try { python.kill('SIGKILL'); } catch(e) {}
+        });
+      });
+    } catch (e) {
+      console.warn(`[YT-Download] pytube download-file error: ${e.message.substring(0, 80)}`);
+      return false;
+    }
+  }
   async function tryScraperFallback(res, safeVideoId, isAudio) {
     console.log(`[YT-Download] Mencoba full scrape pipeline untuk ${safeVideoId}...`);
     const videoUrl = `https://www.youtube.com/watch?v=${safeVideoId}`;
@@ -2713,12 +2784,13 @@ app.get("/api/yt-download", async (req, res) => {
       }
     }).then(async (result) => {
       if (result === 'fallback') {
-        console.log(`[YT-Download] yt-dlp 403, mencoba ytdl-core stream...`);
+        console.log(`[YT-Download] yt-dlp 403, mencoba fallback chain...`);
         if (!res.headersSent) {
           let ok = await tryYtdlCoreStream(res, safeVideoId, isAudio);
-          if (!ok) ok = await tryScraperFallback(res, safeVideoId, isAudio);
-          if (!ok) ok = await tryCobaltFallback(res, safeVideoId, isAudio);
-          if (!ok) {
+          if (!ok && !res.headersSent) ok = await tryPytubeDownloadFile(res, safeVideoId, isAudio, pytubeQuality);
+          if (!ok && !res.headersSent) ok = await tryScraperFallback(res, safeVideoId, isAudio);
+          if (!ok && !res.headersSent) ok = await tryCobaltFallback(res, safeVideoId, isAudio);
+          if (!ok && !res.headersSent) {
             ok = await tryInvidiousFallback(res, safeVideoId, isAudio);
             if (!ok && !res.headersSent) {
               res.status(502).json({ error: "Semua metode download gagal" });
@@ -2729,11 +2801,12 @@ app.get("/api/yt-download", async (req, res) => {
     }).catch(async (err) => {
       console.warn(`[YT-Download] yt-dlp error: ${err.message.substring(0, 150)}`);
       if (!res.headersSent) {
-        console.log(`[YT-Download] Mencoba ytdl-core stream...`);
+        console.log(`[YT-Download] Mencoba fallback chain...`);
         let ok = await tryYtdlCoreStream(res, safeVideoId, isAudio);
-        if (!ok) ok = await tryScraperFallback(res, safeVideoId, isAudio);
-        if (!ok) ok = await tryCobaltFallback(res, safeVideoId, isAudio);
-        if (!ok) {
+        if (!ok && !res.headersSent) ok = await tryPytubeDownloadFile(res, safeVideoId, isAudio, pytubeQuality);
+        if (!ok && !res.headersSent) ok = await tryScraperFallback(res, safeVideoId, isAudio);
+        if (!ok && !res.headersSent) ok = await tryCobaltFallback(res, safeVideoId, isAudio);
+        if (!ok && !res.headersSent) {
           ok = await tryInvidiousFallback(res, safeVideoId, isAudio);
           if (!ok && !res.headersSent) {
             res.status(502).json({ error: "Download gagal: " + err.message.substring(0, 100) });
