@@ -2080,6 +2080,12 @@ app.get("/api/yt-download", async (req, res) => {
     "--max-sleep-interval", "5",
   ];
 
+  // Cookies YouTube otomatis jika ada
+  const ytCookiesPath = path.join(__dirname, "cookies", "youtube_cookies.txt");
+  if (fs.existsSync(ytCookiesPath)) {
+    ytdlpBaseArgs.push("--cookies", ytCookiesPath);
+  }
+
   const { spawn } = require('child_process');
 
   // ─── Helper: Fallback via @distube/ytdl-core streaming (Node.js native) ──
