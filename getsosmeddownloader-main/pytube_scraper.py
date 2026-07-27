@@ -2,7 +2,6 @@ import sys
 import json
 import os
 import traceback
-import time
 
 # Path ke cookies YouTube (opsional, untuk bypass bot detection)
 COOKIES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cookies", "youtube_cookies.txt")
@@ -31,28 +30,29 @@ def main():
 
     try:
         # Daftar client untuk dicoba (urutan: yang paling mungkin bypass bot detection)
+        # Prioritas: WEB (dengan po_token) > IOS > ANDROID > TV > lainnya
         clients_to_try = [
-            'WEB',
-            'IOS',
-            'ANDROID',
-            'TV',
-            'ANDROID_MUSIC',
-            'IOS_MUSIC',
-            'WEB_EMBEDDED',
-            'TV_EMBEDDED',
-            'MWEB',
-            'ANDROID_VR',
-            'ANDROID_TESTSUITE',
-            'WEB_CREATOR',
-            'WEB_MUSIC',
-            'MEDIA_CONNECT',
-            'ANDROID_PRODUCER',
-            'IOS_CREATOR',
-            'ANDROID_CREATOR',
-            'ANDROID_KIDS',
-            'IOS_KIDS',
-            'WEB_KIDS',
-            'WEB_SAFARI',
+            'WEB',                # Paling umum, butuh po_token untuk hindari bot check
+            'IOS',                # iOS client sering bypass
+            'ANDROID',            # Android client alternatif
+            'TV',                 # TV client (sering work untuk video terbatas)
+            'ANDROID_MUSIC',      # Music client alternatif
+            'IOS_MUSIC',          # iOS Music
+            'WEB_EMBEDDED',       # Embedded web
+            'TV_EMBEDDED',        # Embedded TV
+            'MWEB',               # Mobile web
+            'ANDROID_VR',         # VR
+            'ANDROID_TESTSUITE',  # Test suite (kadang work)
+            'WEB_CREATOR',        # Creator web
+            'WEB_MUSIC',          # Web music
+            'MEDIA_CONNECT',      # Media connect (client baru)
+            'ANDROID_PRODUCER',   # Producer
+            'IOS_CREATOR',        # iOS Creator
+            'ANDROID_CREATOR',    # Android Creator
+            'ANDROID_KIDS',       # Kids
+            'IOS_KIDS',           # iOS Kids
+            'WEB_KIDS',           # Web Kids
+            'WEB_SAFARI',         # Safari web
         ]
 
         yt = None
@@ -82,10 +82,9 @@ def main():
                 except Exception as e:
                     last_error = str(e)
                     yt = None
-                    time.sleep(0.5)  # Small delay between attempts
                     continue
 
-        # Mode 3: Fallback tanpa parameter client
+        # Mode 4: Fallback tanpa parameter client
         if yt is None:
             try:
                 yt = YouTube(url)
@@ -129,12 +128,13 @@ def main():
         except Exception as e:
             print(json.dumps({"error": f"Gagal ambil audio: {str(e)}"}), file=sys.stderr)
 
-        # 3. Adaptive video (DASH) untuk resolusi tinggi (1080p+)
+        # 3. Adaptive video (DASH) untuk resolusi tinggi (1080p+) — selalu ambil
         try:
             adaptive_video = yt.streams.filter(only_video=True).order_by('resolution').desc()
             adaptive_added = 0
             if adaptive_video:
                 for s in adaptive_video:
+                    # Hanya ambil resolusi >= 720p dan yang belum ada di progressive
                     if s.resolution and s.resolution not in [f["quality"] for f in formats if f["type"] == "video"]:
                         formats.append({
                             "type": "video",
