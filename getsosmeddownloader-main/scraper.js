@@ -292,6 +292,45 @@ function getRandomCookieFile() {
 }
 
 /**
+ * Mendapatkan YouTube cookie file (untuk bypass bot detection pada YouTube/Spotify).
+ * Prioritas:
+ *   1. cookies/yt_cookie.txt (dibuat dari YT_COOKIE atau YT_COOKIE_BASE64 env var)
+ *   2. cookies/railway_cookie.txt (dibuat dari IG_COOKIE env var — reuse untuk YouTube juga)
+ *   3. File .txt lain di folder cookies/
+ * Returns null jika tidak ada.
+ */
+function getYtCookieFile() {
+  const cookiesDir = path.join(__dirname, 'cookies');
+  
+  try {
+    if (!fs.existsSync(cookiesDir)) return null;
+    
+    const files = fs.readdirSync(cookiesDir).filter(f => f.endsWith('.txt'));
+    if (files.length === 0) return null;
+    
+    // Priority 1: yt_cookie.txt (spesifik untuk YouTube)
+    if (files.includes('yt_cookie.txt')) {
+      console.log(`[Scraper] Menggunakan YouTube cookies: yt_cookie.txt`);
+      return path.join(cookiesDir, 'yt_cookie.txt');
+    }
+    
+    // Priority 2: railway_cookie.txt (reuse IG cookies untuk YouTube)
+    if (files.includes('railway_cookie.txt')) {
+      console.log(`[Scraper] Menggunakan YouTube cookies: railway_cookie.txt (reuse IG cookies)`);
+      return path.join(cookiesDir, 'railway_cookie.txt');
+    }
+    
+    // Priority 3: File .txt lain
+    const chosenFile = files[0];
+    console.log(`[Scraper] Menggunakan YouTube cookies: ${chosenFile} (fallback)`);
+    return path.join(cookiesDir, chosenFile);
+  } catch (err) {
+    console.warn("[Scraper] Gagal membaca YouTube cookies:", err.message);
+    return null;
+  }
+}
+
+/**
  * Cek apakah URL adalah Instagram Story URL.
  */
 function isInstagramStoryUrl(url) {
@@ -432,14 +471,26 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       break;
       
     case "spotify":
+      // Spotify menggunakan ytsearch untuk mencari di YouTube
+      // Maka perlu argumen extractor YouTube untuk bypass bot detection
+      args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js");
+      args.push("--extractor-retries", "5");
+      args.push("--throttled-rate", "100M");
       args.push("-f", "bestaudio[ext=m4a]/bestaudio/best");
       break;
   }
 
+  // Jika ada YouTube cookie file, gunakan untuk bypass bot detection
+  const ytCookieFile = (platform === "youtube" || platform === "spotify") ? getYtCookieFile() : null;
+  if (ytCookieFile) {
+    args.push("--cookies", ytCookieFile);
+    console.log(`[Scraper] Menggunakan YouTube cookies: ${path.basename(ytCookieFile)}`);
+  }
+
   args.push(targetUrl);
 
-  // YouTube/Facebook mungkin butuh waktu lebih lama
-  const timeout = (platform === "youtube" || platform === "facebook") ? 90000 : 60000;
+  // YouTube/Facebook/Spotify (via ytsearch) mungkin butuh waktu lebih lama
+  const timeout = (platform === "youtube" || platform === "facebook" || platform === "spotify") ? 90000 : 60000;
   const raw = await runCommand("yt-dlp", args, timeout);
   const info = JSON.parse(raw);
 
@@ -5608,8 +5659,16 @@ async function scrapeYouTubeViaYtDlpDirect(url) {
     "--throttled-rate", "100M",
     "--sleep-interval", "2",
     "--max-sleep-interval", "5",
-    cleanUrl
   ];
+
+  // Tambahkan cookies jika ada (untuk Railway: YT_COOKIE env var)
+  const ytCookieFile = getYtCookieFile();
+  if (ytCookieFile) {
+    infoArgs.push("--cookies", ytCookieFile);
+    console.log(`[YouTube] Menggunakan YouTube cookies: ${path.basename(ytCookieFile)}`);
+  }
+
+  infoArgs.push(cleanUrl);
 
   const raw = await runCommand("yt-dlp", infoArgs, 120000);
   const info = JSON.parse(raw);
