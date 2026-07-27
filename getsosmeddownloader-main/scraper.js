@@ -367,29 +367,6 @@ async function checkYtDlp() {
  * @param {string} url - URL media
  * @param {string} platform - Nama platform (instagram, tiktok, youtube, facebook)
  */
-/**
- * Ekstrak judul lagu dari halaman Spotify
- */
-async function extractSpotifyTitle(url) {
-  try {
-    const spRes = await axios.get(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-      timeout: 15000,
-    });
-    const titleMatch = spRes.data.match(/<title>(.*?)<\/title>/);
-    if (titleMatch && titleMatch[1]) {
-      let title = titleMatch[1];
-      title = title.replace(/ - song and lyrics by /i, " ");
-      title = title.replace(/ \| Spotify/i, "");
-      title = title.replace(/&amp;/g, "&");
-      return title.trim();
-    }
-  } catch (e) {
-    console.warn(`[Spotify] Gagal extract title: ${e.message}`);
-  }
-  return null;
-}
-
 async function scrapeViaYtDlp(url, platform = "instagram") {
   console.log(`[Scraper] Mencoba yt-dlp untuk ${platform}...`);
 
@@ -455,18 +432,8 @@ async function scrapeViaYtDlp(url, platform = "instagram") {
       break;
       
     case "spotify":
-      // Spotify searches YouTube — gunakan YouTube extractor args untuk bypass bot
       args.push("-f", "bestaudio[ext=m4a]/bestaudio/best");
-      args.push("--extractor-args", "youtube:player_client=mediaconnect,tv_embedded,ios,android,mweb,web;player_skip=webpage,configs,js");
-      args.push("--extractor-retries", "5");
-      args.push("--throttled-rate", "100M");
       break;
-  }
-
-  // Cookies YouTube otomatis jika ada (berlaku untuk semua platform)
-  const ytCookiesPath = require("path").join(__dirname, "cookies", "youtube_cookies.txt");
-  if (fs.existsSync(ytCookiesPath)) {
-    args.push("--cookies", ytCookiesPath);
   }
 
   args.push(targetUrl);
@@ -6116,9 +6083,6 @@ async function scrapeYouTubeViaPytube(url) {
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) throw new Error("Tidak dapat mengekstrak video ID YouTube");
 
-  // Clean URL: use only the video ID to avoid query param issues
-  const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
   const scriptPath = require("path").join(__dirname, "pytube_scraper.py");
 
   // Coba beberapa varian perintah python
@@ -6128,7 +6092,7 @@ async function scrapeYouTubeViaPytube(url) {
 
   for (const pythonCmd of pythonCandidates) {
     try {
-      return await runPytubeScript(pythonCmd, scriptPath, cleanUrl, videoId);
+      return await runPytubeScript(pythonCmd, scriptPath, url, videoId);
     } catch (err) {
       // Jika python tidak ditemukan (ENOENT), coba kandidat berikutnya
       if (err.message.includes("ENOENT") || err.message.includes("not found")) {
@@ -8402,24 +8366,6 @@ async function scrapeMedia(url) {
           return await scrapeViaSiputzxAPI(url);
         } catch (fbErr) {
           console.warn(`[Scraper] Facebook fallback gagal: ${fbErr.message}`);
-        }
-      }
-      
-      // Spotify: coba cari via judul di YouTube dengan opsi berbeda
-      if (platform === "spotify") {
-        try {
-          const title = await extractSpotifyTitle(url);
-          if (title) {
-            console.log(`[Spotify] Coba ulang yt-dlp dengan title: ${title}...`);
-            const retryResult = await scrapeViaYtDlp(`ytsearch1:${title}`, "youtube");
-            const hasValid = retryResult.mediaItems.some(item => item.url && item.url.length > 10);
-            if (hasValid) {
-              retryResult.platform = "spotify";
-              return retryResult;
-            }
-          }
-        } catch (spotifyRetryErr) {
-          console.warn(`[Scraper] Spotify retry gagal: ${spotifyRetryErr.message}`);
         }
       }
     }
